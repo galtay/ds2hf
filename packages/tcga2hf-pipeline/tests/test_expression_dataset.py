@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -100,6 +101,46 @@ def _write_project(
     raw = root / "raw" / project_id
     raw.mkdir(parents=True)
     (raw / "cases.json").write_text(json.dumps(cases))
+
+    # Raw STAR TSVs, needed because the N_* tallies are read from `raw/`
+    # rather than from the per-project table. Only the head is parsed, so a
+    # single gene row after the QC block is enough to exercise the early
+    # break.
+    expr = raw / "expression"
+    expr.mkdir()
+    manifest = []
+    for a_i, aliquot in enumerate(aliquots):
+        name = f"{aliquot}.rna_seq.augmented_star_gene_counts.tsv"
+        header = (
+            "gene_id\tgene_name\tgene_type\tunstranded\tstranded_first"
+            "\tstranded_second\ttpm_unstranded\tfpkm_unstranded\tfpkm_uq_unstranded"
+        )
+        base = (a_i + 1) * 1000
+        (expr / name).write_text(
+            "# gene-model: GENCODE v36\n"
+            + header
+            + "\n"
+            + f"N_unmapped\t\t\t{base}\t{base}\t{base}\t\t\t\n"
+            + f"N_multimapping\t\t\t{base + 1}\t{base + 1}\t{base + 1}\t\t\t\n"
+            + f"N_noFeature\t\t\t{base + 2}\t{base + 2}\t{base + 2}\t\t\t\n"
+            + f"N_ambiguous\t\t\t{base + 3}\t{base + 3}\t{base + 3}\t\t\t\n"
+            + f"{gene_ids[0]}\tG0\tprotein_coding\t7\t3\t4\t1.0\t0.5\t0.6\n"
+        )
+        manifest.append(
+            {
+                "file_id": f"file-{a_i}",
+                "file_name": name,
+                "cases": [
+                    {
+                        "case_id": f"case-{a_i}",
+                        "samples": [
+                            {"portions": [{"analytes": [{"aliquots": [{"aliquot_id": aliquot}]}]}]}
+                        ],
+                    }
+                ],
+            }
+        )
+    (expr / "manifest.json").write_text(json.dumps(manifest))
 
 
 def samples_have_balance(out: Path) -> bool:
@@ -260,3 +301,43 @@ def test_build_reports_projects_in_the_strand_breakdown(tmp_path: Path) -> None:
     assert covered == 2, "every project must appear in exactly one bucket"
     # And the two accountings of the same fact must agree.
     assert sum(n for _, n, _ in strand["outlier_projects"]) == strand["n_strand_specific"]
+
+
+def test_qc_tallies_read_only_the_head(tmp_path: Path) -> None:
+    """The N_* rows come off the top of each TSV, keyed by aliquot."""
+    _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
+    tallies = ed.qc_tallies(tmp_path / "raw" / "TCGA-AA")
+
+    assert set(tallies) == {"al-a0", "al-a1"}
+    assert tallies["al-a0"] == {
+        "n_unmapped": 1000,
+        "n_multimapping": 1001,
+        "n_nofeature": 1002,
+        "n_ambiguous": 1003,
+    }
+    assert tallies["al-a1"]["n_unmapped"] == 2000
+
+
+def test_qc_tallies_are_null_without_raw_files(tmp_path: Path) -> None:
+    """A missing library is not a library of zero unmapped reads."""
+    _write_project(tmp_path, "TCGA-AA", ["al-a0"])
+    shutil.rmtree(tmp_path / "raw" / "TCGA-AA" / "expression")
+
+    _, _ = ed.build(
+        tmp_path / "processed_project_tabular",
+        tmp_path / "raw",
+        tmp_path / "processed_expression",
+    )
+    df = pq.read_table(tmp_path / "processed_expression" / "samples" / "data.parquet").to_pandas()
+    assert df.n_unmapped.isna().all()
+
+
+def test_build_carries_the_qc_tallies(tmp_path: Path) -> None:
+    _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
+    _write_project(tmp_path, "TCGA-BB", ["al-b0"])
+    out = tmp_path / "processed_expression"
+
+    ed.build(tmp_path / "processed_project_tabular", tmp_path / "raw", out)
+    df = pq.read_table(out / "samples" / "data.parquet").to_pandas()
+    assert df.n_unmapped.tolist() == [1000, 2000, 1000]
+    assert df.n_ambiguous.tolist() == [1003, 2003, 1003]

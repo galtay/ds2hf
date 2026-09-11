@@ -1995,12 +1995,23 @@ easy.
 metastatic and recurrent samples all ship; filter on `sample_type` rather
 than assuming a tumour-only cohort.
 
-**STAR's QC tallies are not here.** `N_unmapped`, `N_multimapping`,
-`N_noFeature` and `N_ambiguous` are per-aliquot mapping statistics that
-live as pseudo-gene rows in the source TSV. They are not gene measurements,
-and the per-project expression tables this dataset is built from carry
-exactly the {n_genes:,} gene rows — which is also why every `values` list is
-exactly {n_genes:,} long and needs no masking.
+**Library composition is published, and it is not uniform.** Alongside the
+gene counts, each sample carries STAR's four unassigned-read tallies —
+`n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous`. Those plus the
+gene counts account for every read in the library, so the fraction actually
+assigned to genes is a per-sample QC measure:
+
+```python
+s = load_dataset("{repo_id}", "samples", split="train").to_pandas()
+unassigned = s[["n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"]].sum(axis=1)
+```
+
+It ranges from roughly 25% to 81% across TCGA and **tracks the project** —
+TCGA-LAML sits near 40%, TCGA-CHOL near 77%. That is a confounder for any
+model trained across cancer types, so it is shipped as a column you can
+condition on rather than something to discover later. The tallies stay on
+the sample and off the matrix, which is why every `values` list is exactly
+{n_genes:,} long and needs no masking.
 
 """
         + _GDC_REFERENCES

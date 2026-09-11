@@ -44,6 +44,8 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from tcga2hf_pipeline import expression as _expression_mod
+
 # One config per column of the GDC STAR-counts TSV, GDC's spelling kept.
 # The dtype is the narrowest that holds every published value exactly.
 QUANTIFICATIONS: dict[str, pa.DataType] = {
@@ -95,17 +97,34 @@ SAMPLES_FIELDS: list[pa.Field] = [
     # not — chiefly TCGA-GBM — so this is published per sample rather than
     # asserted in prose. Null when the library has no stranded reads.
     pa.field("strand_balance", pa.float32()),
+    # STAR's four unassigned-read tallies, copied from the pseudo-gene rows
+    # at the top of the source TSV. Together with the gene counts they
+    # account for every read in the library, so `assigned / total` is a
+    # per-sample QC measure — and it is not a constant: it ranges from ~35%
+    # (TCGA-LAML) to ~81% (TCGA-CHOL) and tracks the project, which makes it
+    # a confounder worth being able to condition on rather than discover.
+    pa.field("n_unmapped", pa.int64()),
+    pa.field("n_multimapping", pa.int64()),
+    pa.field("n_nofeature", pa.int64()),
+    pa.field("n_ambiguous", pa.int64()),
 ]
 
-# STAR's four unassigned-read tallies (`N_unmapped`, `N_multimapping`,
-# `N_noFeature`, `N_ambiguous`) are deliberately absent. They live as
-# pseudo-gene rows in the source TSV, and `expression.py` parses them, but
-# the per-project `gene_expression_quantification` tables this build reads
-# carry exactly the 60,660 gene rows and route the tallies elsewhere.
-# Carrying them here would mean a second pass over ~49 GB of raw TSVs for
-# four integers a sample, and would put a column in this dataset that its
-# stated source doesn't contain. Their absence is also why `values` is
-# exactly 60,660 long and needs no masking.
+# Source TSV name -> our column. Snake-cased the way every other GDC column
+# in this project is; `N_noFeature` loses its interior capital.
+QC_COLUMNS: dict[str, str] = {
+    "N_unmapped": "n_unmapped",
+    "N_multimapping": "n_multimapping",
+    "N_noFeature": "n_nofeature",
+    "N_ambiguous": "n_ambiguous",
+}
+
+# The tallies are the one thing here read from `raw/` rather than from the
+# per-project tables, which carry exactly the 60,660 gene rows. That costs
+# nothing: the N_* rows sit at lines 3-6 of each TSV, ahead of the gene
+# rows, so only the head of each file is read (~0.7 s for 500 files) rather
+# than the ~49 GB the modality occupies. They stay off the matrix and on the
+# sample, which is also why every `values` list is exactly 60,660 long and
+# needs no masking.
 
 GENES_FIELDS: list[pa.Field] = [
     pa.field("gene_index", pa.int32()),
@@ -147,6 +166,48 @@ def gene_axis(project_dir: Path) -> pa.Table:
     for field in GENES_FIELDS[1:]:
         columns[field.name] = model.column(field.name).combine_chunks().cast(field.type)
     return pa.Table.from_pydict(columns, schema=pa.schema(GENES_FIELDS))
+
+
+def qc_tallies(project_raw_dir: Path) -> dict[str, dict[str, int | None]]:
+    """aliquot_id -> STAR's four unassigned-read tallies, from the raw TSVs.
+
+    Reads only the head of each file. The N_* rows are lines 3-6 — after the
+    `# gene-model` comment and the header, before the first ENSG row — so
+    this stops at the first gene row and never touches the other 60,660
+    lines. Parsing is positional (`gene_id`, `gene_name`, `gene_type`,
+    `unstranded`); the two name columns are empty on these rows.
+
+    Missing files or missing rows yield nulls rather than zeros: a library
+    with no unmapped reads and a library we failed to read are different
+    facts, and only one of them is a measurement.
+    """
+    expr_dir = project_raw_dir / "expression"
+    manifest_path = expr_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+
+    out: dict[str, dict[str, int | None]] = {}
+    for entry in json.loads(manifest_path.read_text()):
+        path = expr_dir / entry.get("file_name", "")
+        if not path.exists():
+            continue
+        _, aliquot_id = _expression_mod._file_aliquot_and_case(entry)
+        if not aliquot_id:
+            continue
+        tallies: dict[str, int | None] = dict.fromkeys(QC_COLUMNS.values())
+        with path.open() as handle:
+            for line in handle:
+                if line.startswith("#"):
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                name = parts[0]
+                if name in QC_COLUMNS:
+                    value = parts[3] if len(parts) > 3 else ""
+                    tallies[QC_COLUMNS[name]] = int(value) if value else None
+                elif name != "gene_id":
+                    break  # first gene row: the QC block is behind us
+        out[aliquot_id] = tallies
+    return out
 
 
 def _sample_type_index(cases_path: Path) -> dict[str, dict[str, Any]]:
@@ -216,6 +277,7 @@ def _project_block(
     }
 
     types = _sample_type_index(cases_path)
+    tallies = qc_tallies(cases_path.parent)
     first = genes.groupby("aliquot_id", sort=False).first()
     rows = []
     for aliquot in aliquots:
@@ -231,6 +293,7 @@ def _project_block(
                 "project_id": project_id,
                 "sample_type": meta.get("sample_type"),
                 "source_file_id": rec["source_file_id"],
+                **tallies.get(aliquot, dict.fromkeys(QC_COLUMNS.values())),
             }
         )
     return rows, blocks
