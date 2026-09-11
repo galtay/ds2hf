@@ -19,6 +19,7 @@ from tcga2hf_pipeline import (
     copy_number,
     dataset_card,
     expression,
+    expression_dataset,
     genomic,
     hf_upload,
     mirna,
@@ -1748,6 +1749,129 @@ def upload_webdataset_cmd(
         # sweep any that are no longer part of the local tree so the repo never
         # serves a stale, undeclared table. Shards and .gitattributes are untouched.
         delete_patterns=["*.parquet"],
+    )
+    typer.echo(f"\nuploaded -> {url}")
+
+
+@app.command("build-expression")
+def build_expression_cmd(
+    data_dir: DataDirOpt = None,
+    project: Annotated[
+        list[str] | None,
+        typer.Option("--project", help="Limit to these projects (repeatable). Default: all built."),
+    ] = None,
+) -> None:
+    """Build the cohort-wide expression matrix dataset.
+
+    Writes `<data-dir>/processed_expression/`, the repo root for
+    `gabrielaltay/tcga-expression-open`: one row per sample, the gene axis
+    positional, one config per GDC quantification.
+
+    Reads the per-project `gene_expression_quantification` tables rather
+    than the raw TSVs, so a project must be built before it can be included
+    — which also means every value here is one already published in a
+    per-project dataset, reshaped and not recomputed.
+
+    This is a reshape of a single modality, not a replacement for the
+    per-project datasets: nothing clinical, and no other molecular data,
+    lands here.
+    """
+    root = _resolve_data_dir(data_dir)
+    processed_project_dir = root / "processed_project_tabular"
+    out_dir = root / "processed_expression"
+    typer.echo(f"source:  {processed_project_dir}")
+    typer.echo(f"output:  {out_dir}")
+
+    if out_dir.exists():
+        # A project dropped from the selection must not linger as a stale
+        # row block inside an otherwise-rebuilt matrix.
+        shutil.rmtree(out_dir)
+
+    counts, strand = expression_dataset.build(
+        processed_project_dir,
+        root / "raw",
+        out_dir,
+        projects=project,
+        echo=typer.echo,
+    )
+    typer.echo("")
+    for name, n in sorted(counts.items()):
+        size = (out_dir / name / "data.parquet").stat().st_size
+        typer.echo(f"  {name:<24}{n:>10,} rows{size / 1e6:>10,.0f} MB")
+
+    projects_built = sorted(
+        {p.name for p in processed_project_dir.glob("TCGA-*")} if project is None else set(project)
+    )
+    status_path = root / "raw" / projects_built[0] / "gdc_status.json"
+    gdc_release = (
+        json.loads(status_path.read_text()).get("data_release") if status_path.exists() else None
+    )
+    typer.echo(
+        f"\nstrand balance first/(first+second): median {strand['balance_median']:.4f} "
+        f"[{strand['balance_p01']:.3f}, {strand['balance_p99']:.3f}]; "
+        f"{strand['n_strand_specific']} of {strand['n_samples']:,} samples outside 0.4-0.6"
+    )
+    card = dataset_card.write_expression_card(
+        out_dir, counts, projects_built, strand, gdc_release=gdc_release
+    )
+    typer.echo(f"\nwrote dataset card -> {card}")
+    typer.echo("upload with: tcga2hf-pipeline upload-expression")
+
+
+@app.command("upload-expression")
+def upload_expression_cmd(
+    repo_id: Annotated[
+        str,
+        typer.Option("--repo-id", help="HF dataset repo id."),
+    ] = "gabrielaltay/tcga-expression-open",
+    private: Annotated[
+        bool,
+        typer.Option("--private/--public", help="Upload as private, or public."),
+    ] = False,
+    commit_message: Annotated[
+        str | None,
+        typer.Option("--commit-message", "-m", help="Commit message for this upload."),
+    ] = None,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Push `<data-dir>/processed_expression/` to HF Hub.
+
+    Same discipline as `upload-project-tabular`: every push costs a full
+    dataset-viewer re-index, so build as often as you like and upload once.
+
+    Refuses to run while stray non-dataset files sit in the tree, since
+    `upload_folder` would publish them.
+    """
+    root = _resolve_data_dir(data_dir)
+    processed_dir = root / "processed_expression"
+    if not processed_dir.exists():
+        raise typer.BadParameter(f"{processed_dir} does not exist. Run `build-expression`.")
+
+    strays = [
+        p.relative_to(processed_dir)
+        for p in processed_dir.rglob("*")
+        if p.is_file() and p.name not in {"README.md", "data.parquet"}
+    ]
+    if strays:
+        listed = ", ".join(str(s) for s in sorted(strays)[:10])
+        raise typer.BadParameter(
+            f"{len(strays)} unexpected file(s) under {processed_dir} would be "
+            f"published: {listed}. Remove them and re-run."
+        )
+
+    parquets = sorted(processed_dir.glob("*/data.parquet"))
+    total = sum(q.stat().st_size for q in parquets)
+    visibility = "private" if private else "PUBLIC"
+    typer.echo(f"processed dir: {processed_dir}")
+    typer.echo(f"repo_id:       {repo_id} ({visibility})")
+    typer.echo(f"{len(parquets)} config(s), {total / 1e9:.2f} GB")
+
+    url = hf_upload.upload_dataset(
+        processed_dir=processed_dir,
+        repo_id=repo_id,
+        private=private,
+        commit_message=commit_message or "Update TCGA expression (open access) dataset",
+        delete_patterns=["*/data.parquet"],
     )
     typer.echo(f"\nuploaded -> {url}")
 

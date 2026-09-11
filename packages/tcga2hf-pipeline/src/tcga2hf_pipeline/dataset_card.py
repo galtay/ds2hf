@@ -1780,3 +1780,235 @@ against it rather than comparing raw scores to another cohort's.
 Because ssGSEA weights **ranks**, any strictly monotonic transform of the
 input leaves scores unchanged — there is no reason to log-transform first.
 """
+
+
+def write_expression_card(
+    out_dir: Path,
+    counts: dict[str, int],
+    projects: list[str],
+    strand: dict[str, float],
+    gdc_release: str | None = None,
+) -> Path:
+    """Write the card for the expression-only dataset.
+
+    `out_dir` is the repo root, so the configs reference bare relative
+    paths and the sizes can be read off the built parquets.
+
+    This card describes a *reshape*, not a new derivation, and says so
+    plainly: the numbers are GDC's, the axes are the same GENCODE v36 model
+    every per-gene file repeats, and anything not carried here is carried
+    in the per-project datasets.
+    """
+    from tcga2hf_pipeline.expression_dataset import QUANTIFICATIONS
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    repo_id = "gabrielaltay/tcga-expression-open"
+    release = gdc_release or "unknown (status file missing)"
+    n_samples = counts.get("samples", 0)
+    n_genes = counts.get("genes", 0)
+    # Bound locally so the card body reads as prose rather than as dict lookups.
+    n_strand = int(strand.get("n_samples", 0))
+    n_ss = int(strand.get("n_strand_specific", 0))
+    bal = strand.get("balance_median", float("nan"))
+    bal01 = strand.get("balance_p01", float("nan"))
+    bal99 = strand.get("balance_p99", float("nan"))
+    ratio = strand.get("sum_over_unstranded_median", float("nan"))
+    pct_ss = 100 * n_ss / n_strand if n_strand else 0.0
+    n_clean = int(strand.get("n_projects_clean", 0))
+    _outliers = strand.get("outlier_projects") or []
+    n_projects = n_clean + len(_outliers)
+    if _outliers:
+        outlier_table = "\n".join(
+            ["| project | strand-specific samples | share |", "|---|---:|---:|"]
+            + [
+                f"| `{proj}` | {n:,} of {total:,} | {100 * n / total:.1f}% |"
+                for proj, n, total in _outliers
+            ]
+        )
+    else:
+        outlier_table = "_No sample in this build falls outside the 0.4-0.6 band._"
+
+    order = ["genes", "samples", *QUANTIFICATIONS]
+    lines = ["configs:"]
+    for name in order:
+        if not (out_dir / name / "data.parquet").exists():
+            continue
+        lines.append(f"  - config_name: {name}")
+        lines.append("    data_files:")
+        lines.append("      - split: train")
+        lines.append(f"        path: {name}/data.parquet")
+    configs_block = "\n".join(lines)
+
+    def _mb(name: str) -> str:
+        path = out_dir / name / "data.parquet"
+        return f"{path.stat().st_size / 1e6:,.0f} MB" if path.exists() else "—"
+
+    quant_rows = "\n".join(
+        f"| `{name}` | `{dtype}` | {_mb(name)} |" for name, dtype in QUANTIFICATIONS.items()
+    )
+
+    frontmatter = f"""---
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Gene Expression (Open Access)
+tags:
+  - cancer
+  - tcga
+  - genomics
+  - transcriptomics
+  - rna-seq
+{configs_block}
+---
+"""
+
+    body = (
+        f"""\
+# TCGA Gene Expression — Open Access
+
+Every open-access TCGA RNA-Seq gene expression measurement the NCI Genomic
+Data Commons serves, as one cohort-wide matrix per quantification.
+
+- **GDC data release:** {release}
+- **Built:** {timestamp}
+- **Shape:** {n_samples:,} samples x {n_genes:,} genes
+- **Projects:** {len(projects)}
+
+This is a **reshape, not a derivation**. Every value is the number GDC
+publishes in its STAR-counts TSV; nothing here is recomputed, imputed or
+rescaled. For anything other than expression — clinical, survival,
+mutations, methylation, copy number — see the per-project datasets, which
+also serve this same expression data as one row per (aliquot, gene).
+
+## Layout
+
+One row per **sample**, so a batch of samples is a batch of rows. The gene
+axis is positional rather than a join key:
+
+```
+genes[i]    <->  values[i]     within every value config
+samples[j]  <->  row j         within every value config
+```
+
+which is exactly AnnData's `var` / `obs` / `X` split.
+
+| config | rows | what a row is |
+|---|---:|---|
+| `genes` | {n_genes:,} | one GENCODE v36 gene, in array order |
+| `samples` | {n_samples:,} | one aliquot, in row order |
+
+One config per GDC quantification, each named for the column it carries in
+the source TSV:
+
+| config | dtype | size |
+|---|---|---:|
+{quant_rows}
+
+Download only the one you model on. Each value config repeats
+`sample_index`, `aliquot_id`, `case_submitter_id`, `project_id` and
+`sample_type` inline, so a training loop needs no join at all.
+
+## Reading it
+
+```python
+import numpy as np, pyarrow.parquet as pq
+from datasets import load_dataset
+
+ds = load_dataset("{repo_id}", "tpm_unstranded", split="train")
+X = np.stack(ds.with_format("numpy")["values"])   # ({n_samples:,}, {n_genes:,}) float32
+y = ds["project_id"]
+```
+
+As an `AnnData` — about a second for the whole cohort:
+
+```python
+import anndata as ad
+obs = pq.read_table("samples/data.parquet").to_pandas().set_index("aliquot_id")
+var = pq.read_table("genes/data.parquet").to_pandas().set_index("gene_id")
+X = np.stack(pq.read_table("tpm_unstranded/data.parquet", columns=["values"])
+               .column("values").to_numpy(zero_copy_only=False))
+adata = ad.AnnData(X=X, obs=obs, var=var)
+```
+
+Parquet is the only format shipped. Against a gzip `.h5ad` of the same
+matrix it is the same size, ~6x faster to read whole, and ~50x faster to
+pull a minibatch, so a second artifact would cost sync risk and buy
+nothing.
+
+## Choices worth knowing
+
+**No gene selection.** All {n_genes:,} GENCODE v36 features ship. `gene_type`
+on `genes` makes restricting to the 19,962 protein-coding ones a one-line
+mask — your choice, not ours.
+
+**Narrower dtypes, verified lossless.** Counts are `int32` (largest value
+observed across TCGA is 4.5M, against int32's 2.1B). Normalized values are
+`float32`, whose round-trip error is 6e-8 while GDC prints at most four
+decimal places. No published digit is lost.
+
+**Use `unstranded` unless you have checked `strand_balance`.** STAR emits
+three count columns because the aligner cannot know the library protocol:
+`unstranded` (htseq `-s no`), `stranded_first` (`-s yes`) and
+`stranded_second` (`-s reverse`). You are meant to pick the one matching
+your prep, and picking wrong costs you signal.
+
+Most of TCGA is not strand-specific, which is why GDC derives all three
+normalized values from the unstranded counts, as their names say. But a real
+minority is, and it is concentrated rather than scattered. Every sample
+therefore carries a measured **`strand_balance`** on the `samples` config —
+`stranded_first / (stranded_first + stranded_second)` over the whole library:
+
+| `strand_balance` | means | use |
+|---|---|---|
+| ~0.5 | not strand-specific | `unstranded` |
+| near 0 | reverse-stranded (dUTP) | `stranded_second` |
+| near 1 | forward-stranded | `stranded_first` |
+
+Measured over the {n_strand:,} samples shipped here: median **{bal:.4f}**,
+1st-99th percentile [{bal01:.3f}, {bal99:.3f}], with **{n_ss:,}** samples
+({pct_ss:.1f}%) outside 0.4-0.6 and {n_clean} of the {n_projects} projects
+containing none at all. Where they are:
+
+{outlier_table}
+
+```python
+s = load_dataset("REPO_ID", "samples", split="train").to_pandas()
+unstranded_only = s[s.strand_balance.between(0.4, 0.6)]   # the usual cohort
+```
+
+`unstranded` counts remain valid for every sample regardless of protocol —
+counting reads without regard to strand is never wrong, only less able to
+separate overlapping antisense genes — which is why it, and the TPM/FPKM
+derived from it, stay the right default for cohort-wide comparisons. The
+stranded columns are worth reaching for when you are working inside one of
+the projects below and want the extra specificity. (`first + second` sums to
+slightly more than `unstranded`, median {ratio:.3f}x, because stranded
+counting rescues reads that unstranded counting discards as ambiguous
+between overlapping genes on opposite strands.)
+
+**Split by patient, not by sample.** Some cases contribute more than one
+aliquot, so a random split over rows will put the same patient in train and
+test. `case_submitter_id` is on every value config to make a grouped split
+easy.
+
+**Sample types are all here.** Primary tumours, solid tissue normals,
+metastatic and recurrent samples all ship; filter on `sample_type` rather
+than assuming a tumour-only cohort.
+
+**STAR's QC tallies are not here.** `N_unmapped`, `N_multimapping`,
+`N_noFeature` and `N_ambiguous` are per-aliquot mapping statistics that
+live as pseudo-gene rows in the source TSV. They are not gene measurements,
+and the per-project expression tables this dataset is built from carry
+exactly the {n_genes:,} gene rows — which is also why every `values` list is
+exactly {n_genes:,} long and needs no masking.
+
+"""
+        + _GDC_REFERENCES
+        + _LICENSE_AND_REDISTRIBUTION
+        + _LINK_REFS
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "README.md"
+    out_path.write_text(frontmatter + body)
+    return out_path
