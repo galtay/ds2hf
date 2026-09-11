@@ -108,6 +108,294 @@ TREATMENT_FIELDS: list[pa.Field] = [
     pa.field("treatment_type_administered", pa.string()),
 ]
 
+# ---------------------------------------------------------------------------
+# GDC `/cases` entities added to reach full expansion coverage.
+#
+# The `cases` table is the flattening of one GDC `/cases` response per
+# patient, and that endpoint's shape is set by its `expand` parameter. We
+# previously asked for 11 of the 41 expandable groups; these constants cover
+# the rest of the non-`files` ones. The `files.*` subtree is deliberately
+# still excluded: it is 190 KB per case against 16 KB for everything here
+# (~2.2 GB pan-TCGA), and it duplicates the richer `files` table we build
+# from the `/files` endpoint's own manifests.
+#
+# Fields are taken verbatim from `GET /cases/_mapping`, minus the
+# record-keeping columns (`created_datetime`, `updated_datetime`, `state`,
+# and the `legacy_*` pair on annotations) that every other entity in this
+# schema already drops.
+# ---------------------------------------------------------------------------
+
+ANNOTATION_FIELDS: list[pa.Field] = [
+    pa.field("annotation_id", pa.string()),
+    pa.field("submitter_id", pa.string()),
+    pa.field("case_id", pa.string()),
+    pa.field("case_submitter_id", pa.string()),
+    pa.field("category", pa.string()),
+    pa.field("classification", pa.string()),
+    pa.field("creator", pa.string()),
+    pa.field("entity_id", pa.string()),
+    pa.field("entity_submitter_id", pa.string()),
+    pa.field("entity_type", pa.string()),
+    pa.field("notes", pa.string()),
+    pa.field("status", pa.string()),
+]
+
+
+PATHOLOGY_DETAIL_FIELDS: list[pa.Field] = [
+    pa.field("pathology_detail_id", pa.string()),
+    pa.field("submitter_id", pa.string()),
+    pa.field("additional_pathology_findings", pa.string()),
+    pa.field("anaplasia_present", pa.string()),
+    pa.field("anaplasia_present_type", pa.string()),
+    pa.field("bone_marrow_malignant_cells", pa.string()),
+    pa.field("breslow_thickness", pa.float64()),
+    pa.field("breslow_thickness_category", pa.string()),
+    pa.field("circumferential_resection_margin", pa.float64()),
+    pa.field("columnar_mucosa_present", pa.string()),
+    pa.field("consistent_pathology_review", pa.string()),
+    pa.field("days_to_pathology_detail", pa.int64()),
+    pa.field("dysplasia_degree", pa.string()),
+    pa.field("dysplasia_type", pa.string()),
+    pa.field("epithelioid_cell_percent_range", pa.string()),
+    pa.field("extracapsular_extension", pa.string()),
+    pa.field("extracapsular_extension_present", pa.string()),
+    pa.field("extranodal_extension", pa.string()),
+    pa.field("extraocular_nodule_size", pa.string()),
+    pa.field("extrascleral_extension_present", pa.string()),
+    pa.field("extrathyroid_extension", pa.string()),
+    pa.field("greatest_tumor_dimension", pa.float64()),
+    pa.field("gross_tumor_weight", pa.float64()),
+    pa.field("histologic_progression_type", pa.string()),
+    pa.field("intratubular_germ_cell_neoplasia_present", pa.string()),
+    pa.field("largest_extrapelvic_peritoneal_focus", pa.string()),
+    pa.field("lymph_node_dissection_method", pa.string()),
+    pa.field("lymph_node_dissection_site", pa.string()),
+    pa.field("lymph_node_involved_site", pa.string()),
+    pa.field("lymph_node_involvement", pa.string()),
+    pa.field("lymph_nodes_positive", pa.int64()),
+    pa.field("lymph_nodes_removed", pa.string()),
+    pa.field("lymph_nodes_tested", pa.int64()),
+    pa.field("lymphatic_invasion_present", pa.string()),
+    pa.field("margin_status", pa.string()),
+    pa.field("measurement_type", pa.string()),
+    pa.field("measurement_unit", pa.string()),
+    pa.field("metaplasia_present", pa.string()),
+    pa.field("micrometastasis_present", pa.string()),
+    pa.field("morphologic_architectural_pattern", pa.string()),
+    pa.field("necrosis_percent", pa.float64()),
+    pa.field("necrosis_present", pa.string()),
+    pa.field("non_nodal_regional_disease", pa.string()),
+    pa.field("non_nodal_tumor_deposits", pa.string()),
+    pa.field("number_proliferating_cells", pa.int64()),
+    pa.field("percent_tumor_invasion", pa.float64()),
+    pa.field("percent_tumor_nuclei", pa.float64()),
+    pa.field("perineural_invasion_present", pa.string()),
+    pa.field("peripancreatic_lymph_nodes_positive", pa.string()),
+    pa.field("peripancreatic_lymph_nodes_tested", pa.int64()),
+    pa.field("prcc_type", pa.string()),
+    pa.field("prostatic_chips_positive_count", pa.float64()),
+    pa.field("prostatic_chips_total_count", pa.float64()),
+    pa.field("prostatic_involvement_percent", pa.float64()),
+    pa.field("residual_tumor", pa.string()),
+    pa.field("residual_tumor_measurement", pa.string()),
+    pa.field("rhabdoid_percent", pa.float64()),
+    pa.field("rhabdoid_present", pa.string()),
+    pa.field("sarcomatoid_percent", pa.float64()),
+    pa.field("sarcomatoid_present", pa.string()),
+    pa.field("spindle_cell_percent_range", pa.string()),
+    pa.field("timepoint_category", pa.string()),
+    pa.field("transglottic_extension", pa.string()),
+    pa.field("tumor_basal_diameter", pa.float64()),
+    pa.field("tumor_burden", pa.float64()),
+    pa.field("tumor_depth_descriptor", pa.string()),
+    pa.field("tumor_depth_measurement", pa.float64()),
+    pa.field("tumor_infiltrating_lymphocytes", pa.string()),
+    pa.field("tumor_infiltrating_macrophages", pa.string()),
+    pa.field("tumor_largest_dimension_diameter", pa.float64()),
+    pa.field("tumor_length_measurement", pa.float64()),
+    # Multi-valued: GDC types it `keyword` but returns an array (356
+    # records pan-TCGA).
+    pa.field("tumor_level_prostate", pa.list_(pa.string())),
+    pa.field("tumor_shape", pa.string()),
+    pa.field("tumor_thickness", pa.float64()),
+    pa.field("tumor_width_measurement", pa.float64()),
+    pa.field("vascular_invasion_present", pa.string()),
+    pa.field("vascular_invasion_type", pa.string()),
+    pa.field("zone_of_origin_prostate", pa.string()),
+]
+
+
+MOLECULAR_TEST_FIELDS: list[pa.Field] = [
+    pa.field("molecular_test_id", pa.string()),
+    pa.field("submitter_id", pa.string()),
+    pa.field("aa_change", pa.string()),
+    pa.field("aneuploidy", pa.string()),
+    pa.field("antigen", pa.string()),
+    pa.field("biospecimen_type", pa.string()),
+    pa.field("biospecimen_volume", pa.float64()),
+    pa.field("blood_test_normal_range_lower", pa.float64()),
+    pa.field("blood_test_normal_range_upper", pa.float64()),
+    pa.field("cell_count", pa.int64()),
+    pa.field("chromosomal_translocation", pa.string()),
+    pa.field("chromosome", pa.string()),
+    pa.field("chromosome_arm", pa.string()),
+    pa.field("clonality", pa.string()),
+    pa.field("copy_number", pa.float64()),
+    pa.field("cytoband", pa.string()),
+    pa.field("days_to_test", pa.int64()),
+    pa.field("exon", pa.string()),
+    pa.field("gene_symbol", pa.string()),
+    pa.field("histone_family", pa.string()),
+    pa.field("histone_variant", pa.string()),
+    pa.field("hpv_strain", pa.string()),
+    pa.field("intron", pa.string()),
+    pa.field("laboratory_test", pa.string()),
+    pa.field("loci_abnormal_count", pa.int64()),
+    pa.field("loci_count", pa.int64()),
+    pa.field("locus", pa.string()),
+    pa.field("mismatch_repair_mutation", pa.string()),
+    pa.field("mitotic_count", pa.float64()),
+    pa.field("mitotic_total_area", pa.float64()),
+    pa.field("molecular_analysis_method", pa.string()),
+    pa.field("molecular_consequence", pa.string()),
+    pa.field("mutation_codon", pa.string()),
+    pa.field("pathogenicity", pa.string()),
+    pa.field("ploidy", pa.string()),
+    pa.field("second_exon", pa.string()),
+    pa.field("second_gene_symbol", pa.string()),
+    pa.field("specialized_molecular_test", pa.string()),
+    pa.field("staining_intensity_scale", pa.string()),
+    pa.field("staining_intensity_value", pa.string()),
+    pa.field("test_analyte_type", pa.string()),
+    pa.field("test_result", pa.string()),
+    pa.field("test_units", pa.string()),
+    pa.field("test_value", pa.float64()),
+    pa.field("test_value_range", pa.string()),
+    pa.field("timepoint_category", pa.string()),
+    pa.field("transcript", pa.string()),
+    pa.field("variant_origin", pa.string()),
+    pa.field("variant_type", pa.string()),
+    pa.field("zygosity", pa.string()),
+]
+
+
+OTHER_CLINICAL_ATTRIBUTE_FIELDS: list[pa.Field] = [
+    pa.field("other_clinical_attribute_id", pa.string()),
+    pa.field("submitter_id", pa.string()),
+    pa.field("aids_risk_factors", pa.string()),
+    pa.field("bmi", pa.float64()),
+    pa.field("body_surface_area", pa.float64()),
+    pa.field("cd4_count", pa.float64()),
+    pa.field("cdc_hiv_risk_factors", pa.string()),
+    # Multi-valued despite the `keyword` mapping (626 records pan-TCGA).
+    pa.field("comorbidities", pa.list_(pa.string())),
+    pa.field("comorbidity_method_of_diagnosis", pa.string()),
+    pa.field("days_to_comorbidity", pa.int64()),
+    pa.field("days_to_risk_factor", pa.int64()),
+    pa.field("diabetes_treatment_type", pa.string()),
+    pa.field("dlco_ref_predictive_percent", pa.float64()),
+    pa.field("exercise_frequency_weekly", pa.string()),
+    pa.field("eye_color", pa.string()),
+    pa.field("fertility_history", pa.string()),
+    pa.field("fev1_fvc_post_bronch_percent", pa.float64()),
+    pa.field("fev1_fvc_pre_bronch_percent", pa.float64()),
+    pa.field("fev1_ref_post_bronch_percent", pa.float64()),
+    pa.field("fev1_ref_pre_bronch_percent", pa.float64()),
+    pa.field("haart_treatment_indicator", pa.string()),
+    pa.field("height", pa.float64()),
+    pa.field("hepatitis_sustained_virological_response", pa.string()),
+    pa.field("hiv_viral_load", pa.float64()),
+    pa.field("hormonal_contraceptive_type", pa.string()),
+    pa.field("hormonal_contraceptive_use", pa.string()),
+    pa.field("hormonal_replacement_therapy_status", pa.string()),
+    pa.field("hormone_replacement_therapy_type", pa.string()),
+    pa.field("hysterectomy_margins_involved", pa.string()),
+    pa.field("hysterectomy_type", pa.string()),
+    pa.field("immunosuppressive_treatment_type", pa.string()),
+    pa.field("menopause_status", pa.string()),
+    pa.field("myasthenia_gravis_classification", pa.string()),
+    pa.field("nadir_cd4_count", pa.float64()),
+    pa.field("nononcologic_therapeutic_agents", pa.string()),
+    pa.field("number_of_pregnancies", pa.string()),
+    pa.field("oxygen_use_indicator", pa.string()),
+    pa.field("oxygen_use_type", pa.string()),
+    pa.field("pancreatitis_onset_year", pa.int64()),
+    pa.field("pregnancy_outcome", pa.string()),
+    pa.field("pregnant_at_diagnosis", pa.string()),
+    pa.field("premature_at_birth", pa.string()),
+    pa.field("reflux_treatment_type", pa.string()),
+    pa.field("risk_factor_method_of_diagnosis", pa.string()),
+    pa.field("risk_factor_treatment", pa.string()),
+    # Multi-valued despite the `keyword` mapping (2,015 records pan-TCGA).
+    pa.field("risk_factors", pa.list_(pa.string())),
+    pa.field("timepoint_category", pa.string()),
+    pa.field("treatment_frequency", pa.string()),
+    pa.field("undescended_testis_corrected", pa.string()),
+    pa.field("undescended_testis_corrected_age_range", pa.string()),
+    pa.field("undescended_testis_corrected_laterality", pa.string()),
+    pa.field("undescended_testis_corrected_method", pa.string()),
+    pa.field("undescended_testis_history", pa.string()),
+    pa.field("undescended_testis_history_laterality", pa.string()),
+    # Multi-valued despite the `keyword` mapping (296 records pan-TCGA).
+    pa.field("viral_hepatitis_serology_tests", pa.list_(pa.string())),
+    pa.field("weeks_gestation_at_birth", pa.float64()),
+    pa.field("weight", pa.float64()),
+]
+
+
+PROGRAM_FIELDS: list[pa.Field] = [
+    pa.field("program_id", pa.string()),
+    pa.field("dbgap_accession_number", pa.string()),
+    pa.field("name", pa.string()),
+]
+
+
+TISSUE_SOURCE_SITE_FIELDS: list[pa.Field] = [
+    pa.field("tissue_source_site_id", pa.string()),
+    pa.field("bcr_id", pa.string()),
+    pa.field("code", pa.string()),
+    pa.field("name", pa.string()),
+    pa.field("project", pa.string()),
+]
+
+
+SLIDE_FIELDS: list[pa.Field] = [
+    pa.field("slide_id", pa.string()),
+    pa.field("submitter_id", pa.string()),
+    pa.field("bone_marrow_malignant_cells", pa.string()),
+    pa.field("number_proliferating_cells", pa.int64()),
+    pa.field("percent_eosinophil_infiltration", pa.float64()),
+    pa.field("percent_follicular_component", pa.float64()),
+    pa.field("percent_granulocyte_infiltration", pa.float64()),
+    pa.field("percent_inflam_infiltration", pa.float64()),
+    pa.field("percent_lymphocyte_infiltration", pa.float64()),
+    pa.field("percent_monocyte_infiltration", pa.float64()),
+    pa.field("percent_necrosis", pa.float64()),
+    pa.field("percent_neutrophil_infiltration", pa.float64()),
+    pa.field("percent_normal_cells", pa.float64()),
+    pa.field("percent_rhabdoid_features", pa.float64()),
+    pa.field("percent_sarcomatoid_features", pa.float64()),
+    pa.field("percent_stromal_cells", pa.float64()),
+    pa.field("percent_tumor_cells", pa.float64()),
+    pa.field("percent_tumor_nuclei", pa.float64()),
+    pa.field("prostatic_chips_positive_count", pa.float64()),
+    pa.field("prostatic_chips_total_count", pa.float64()),
+    pa.field("prostatic_involvement_percent", pa.float64()),
+    pa.field("section_location", pa.string()),
+    pa.field("tissue_microarray_coordinates", pa.string()),
+]
+
+
+CENTER_FIELDS: list[pa.Field] = [
+    pa.field("center_id", pa.string()),
+    pa.field("center_type", pa.string()),
+    pa.field("code", pa.string()),
+    pa.field("name", pa.string()),
+    pa.field("namespace", pa.string()),
+    pa.field("short_name", pa.string()),
+]
+
+
 DIAGNOSIS_FIELDS: list[pa.Field] = [
     pa.field("diagnosis_id", pa.string()),
     pa.field("submitter_id", pa.string()),
@@ -237,6 +525,11 @@ DIAGNOSIS_FIELDS: list[pa.Field] = [
     pa.field("wilms_tumor_histologic_subtype", pa.string()),
     pa.field("year_of_diagnosis", pa.int64()),
     pa.field("treatments", pa.list_(pa.struct(TREATMENT_FIELDS))),
+    # Curator notes attached to this diagnosis (GDC `annotations`).
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
+    # Disease-specific pathology measurements — 78 fields, nearly all null
+    # for any one cancer type since the form is a pan-cancer union.
+    pa.field("pathology_details", pa.list_(pa.struct(PATHOLOGY_DETAIL_FIELDS))),
 ]
 
 FOLLOW_UP_FIELDS: list[pa.Field] = [
@@ -281,6 +574,16 @@ FOLLOW_UP_FIELDS: list[pa.Field] = [
     pa.field("timepoint_category", pa.string()),
     pa.field("treatment_emergent_adverse_event", pa.string()),
     pa.field("year_of_follow_up", pa.int64()),
+    # Biomarker / molecular assay results recorded at follow-up: IHC stains,
+    # FISH translocations, mutation tests. TCGA-CHOL alone has 281 across 51
+    # cases, so this is real clinical content rather than a rare edge case.
+    pa.field("molecular_tests", pa.list_(pa.struct(MOLECULAR_TEST_FIELDS))),
+    # Comorbidities, risk factors, anthropometrics and the disease-specific
+    # attributes that have no column on the core follow-up form.
+    pa.field(
+        "other_clinical_attributes",
+        pa.list_(pa.struct(OTHER_CLINICAL_ATTRIBUTE_FIELDS)),
+    ),
 ]
 
 EXPOSURE_FIELDS: list[pa.Field] = [
@@ -354,6 +657,9 @@ ALIQUOT_FIELDS: list[pa.Field] = [
     pa.field("selected_normal_wgs", pa.bool_()),
     pa.field("selected_normal_wxs", pa.bool_()),
     pa.field("source_center", pa.string()),
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
+    # The sequencing / characterization centre that produced this aliquot.
+    pa.field("center", pa.struct(CENTER_FIELDS)),
 ]
 
 ANALYTE_FIELDS: list[pa.Field] = [
@@ -373,6 +679,7 @@ ANALYTE_FIELDS: list[pa.Field] = [
     pa.field("spectrophotometer_method", pa.string()),
     pa.field("well_number", pa.string()),
     pa.field("aliquots", pa.list_(pa.struct(ALIQUOT_FIELDS))),
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
 ]
 
 PORTION_FIELDS: list[pa.Field] = [
@@ -384,6 +691,12 @@ PORTION_FIELDS: list[pa.Field] = [
     pa.field("portion_number", pa.string()),
     pa.field("weight", pa.float64()),
     pa.field("analytes", pa.list_(pa.struct(ANALYTE_FIELDS))),
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
+    pa.field("center", pa.struct(CENTER_FIELDS)),
+    # Per-slide pathology QC: percent tumour cells, necrosis, lymphocyte
+    # infiltration. The GDC-harmonized counterpart of the BCR biotab slide
+    # form in `biospecimen_supplement_slide`.
+    pa.field("slides", pa.list_(pa.struct(SLIDE_FIELDS))),
 ]
 
 SAMPLE_FIELDS: list[pa.Field] = [
@@ -425,6 +738,7 @@ SAMPLE_FIELDS: list[pa.Field] = [
     pa.field("tissue_type", pa.string()),
     pa.field("tumor_descriptor", pa.string()),
     pa.field("portions", pa.list_(pa.struct(PORTION_FIELDS))),
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
 ]
 
 # ---------------------------------------------------------------------------
@@ -913,6 +1227,47 @@ PATIENT_FIELDS: list[pa.Field] = [
         pa.field("dfi_event", pa.int64()),
         pa.field("dfi_time", pa.float64()),
     ])),
+    # Case-level curator annotations — the QC flags that say a case was
+    # redacted, has a prior malignancy, or is otherwise "do not use".
+    pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
+    # The BCR that contributed the specimen; `code` is the 2-character site
+    # in every TCGA barcode ("4G" -> Sapienza University of Rome).
+    pa.field("tissue_source_site", pa.struct(TISSUE_SOURCE_SITE_FIELDS)),
+    pa.field("program", pa.struct(PROGRAM_FIELDS)),
+    # GDC's own file tallies for this case, across every data category and
+    # experimental strategy it holds — including the controlled-access and
+    # image files this dataset does not carry.
+    pa.field(
+        "summary",
+        pa.struct(
+            [
+                pa.field("file_count", pa.int64()),
+                pa.field("file_size", pa.int64()),
+                pa.field(
+                    "data_categories",
+                    pa.list_(
+                        pa.struct(
+                            [
+                                pa.field("data_category", pa.string()),
+                                pa.field("file_count", pa.int64()),
+                            ]
+                        )
+                    ),
+                ),
+                pa.field(
+                    "experimental_strategies",
+                    pa.list_(
+                        pa.struct(
+                            [
+                                pa.field("experimental_strategy", pa.string()),
+                                pa.field("file_count", pa.int64()),
+                            ]
+                        )
+                    ),
+                ),
+            ]
+        ),
+    ),
 ]
 
 # ssGSEA columns are appended after SSGSEA_COLLECTIONS is declared (below),
@@ -1003,9 +1358,13 @@ TABULAR_EXPRESSION_FIELDS: list[pa.Field] = [
     *_CASE_FKS,
     *_ALIQUOT_FKS,
     pa.field("source_file_id", pa.string()),
+    # Join key into `gene_model`. `gene_name` and `gene_type` are NOT
+    # repeated here: they are the same 60,660 values in every aliquot's TSV,
+    # and together they cost 487 MB of TCGA-BRCA's 1.88 GiB expression table
+    # — more than every count and normalized-value column combined. They
+    # live once in `gene_model` instead, and the source TSV is exactly
+    # reconstructible by joining on `gene_id`.
     pa.field("gene_id", pa.string()),
-    pa.field("gene_name", pa.string()),
-    pa.field("gene_type", pa.string()),
     pa.field("unstranded", pa.int64()),
     pa.field("stranded_first", pa.int64()),
     pa.field("stranded_second", pa.int64()),
@@ -1038,9 +1397,28 @@ TABULAR_FILES_FIELDS: list[pa.Field] = [
     pa.field("gdc_version", pa.string()),
     pa.field("gdc_first_release", pa.string()),
     pa.field("gdc_superseded", pa.bool_()),
+    pa.field("platform", pa.string()),
     # Local label naming the project subdir the file came from
-    # (`mutations` / `expression` / ...).
+    # (`mutations` / `expression` / ...). Null for files this pipeline never
+    # downloaded.
     pa.field("modality", pa.string()),
+    # Every open-access file GDC holds for the project gets a row here,
+    # including the ones this dataset does not carry. That makes the table
+    # an honest index of the project's whole GDC footprint at negligible
+    # cost — TCGA-CHOL's 110 whole-slide images are 88.6 GiB of bytes but
+    # 110 rows of index.
+    #
+    # `in_dataset` means "this file's content is in a published table", not
+    # "we downloaded it". The per-case BCR XML supplements are downloaded
+    # but deliberately unpublished — they are a second serialization of the
+    # biotab data, verified value-for-value — so they are False here.
+    pa.field("in_dataset", pa.bool_()),
+    # Which table carries it, or null when `in_dataset` is false. A `*`
+    # suffix denotes a family of per-form tables (`clinical_supplement_*`).
+    pa.field("dataset_table", pa.string()),
+    # Populated on every row, present or absent: it is how you fetch what
+    # this dataset omits, and how you re-verify what it includes.
+    pa.field("gdc_download_url", pa.string()),
 ]
 
 
@@ -1153,6 +1531,180 @@ TABULAR_MASKED_CNV_FIELDS: list[pa.Field] = [
     # Array probes supporting the segment — the segment's evidence weight.
     pa.field("num_probes", pa.int32()),
     pa.field("segment_mean", pa.float64()),
+]
+
+
+# The unmasked segments — the third and fourth of the GDC's four open copy
+# number data types, and the pair that completes source parity.
+#
+# Two workflows share this table, distinguished by `workflow_type`, because
+# they answer the same question with the same six columns:
+#
+#   - **DNAcopy** covers exactly the aliquots `masked_copy_number_segment`
+#     covers (22,629 files either way). The only difference is that the
+#     germline CNV segments are still present, so the two tables diffed
+#     against each other *are* the mask.
+#   - **GATK4 CNV** is WGS read-depth rather than array intensity, over
+#     aliquots the genotyping arrays never touched — on TCGA-CHOL its 98
+#     aliquots do not intersect the array-based 85 at all. It is new
+#     coverage, not a second opinion on existing coverage.
+#
+# They are not interchangeable despite the shared columns: `num_probes`
+# counts array probes for DNAcopy and sequencing bins for GATK4, so the
+# evidence weight is only comparable within a workflow. GATK4 is a paired
+# caller and carries the matched normal; DNAcopy is single-aliquot and
+# leaves those two columns null.
+TABULAR_COPY_NUMBER_SEGMENT_FIELDS: list[pa.Field] = [
+    *_CASE_FKS,
+    *_SAMPLE_FKS,
+    *_ALIQUOT_FKS,
+    # GATK4 CNV only; null for the single-aliquot DNAcopy files.
+    pa.field("matched_normal_aliquot_id", pa.string()),
+    pa.field("matched_normal_aliquot_submitter_id", pa.string()),
+    # "DNAcopy" | "GATK4 CNV".
+    pa.field("workflow_type", pa.string()),
+    # "Genotyping Array" for DNAcopy, "WGS" for GATK4 CNV.
+    pa.field("experimental_strategy", pa.string()),
+    pa.field("source_file_id", pa.string()),
+    # Bare names ("1") from DNAcopy, `chr`-prefixed ("chr1") from GATK4 CNV.
+    # Carried as each file writes it, matching the two segment tables above.
+    pa.field("chromosome", pa.string()),
+    pa.field("start", pa.int64()),
+    pa.field("end", pa.int64()),
+    # Array probes (DNAcopy) or sequencing bins (GATK4 CNV) — see above.
+    pa.field("num_probes", pa.int32()),
+    pa.field("segment_mean", pa.float64()),
+]
+
+
+# Copy number projected onto the GENCODE v36 gene model, all four callers.
+#
+# `gene_name`, `chromosome`, `start` and `end` are deliberately NOT repeated
+# here — they are identical in all 33,902 source files and live once in
+# `gene_model`, joined on `gene_id`. That is the single biggest size lever
+# in the layout: the GDC ships this data type as 3,350 KB of TSV per
+# aliquot, of which the gene model is the overwhelming majority.
+#
+# Why this table exists at all, given that we already publish the segments:
+#
+#   - ASCAT2 / ASCAT3 / AscatNGS gene-level values are exactly reproducible
+#     by projecting `allele_specific_copy_number_segment` onto the gene
+#     model (verified on TCGA-CHOL: zero mismatches over 3 aliquots and
+#     180k genes, with min/max copy number for boundary-spanning genes
+#     recovered as the min/max over overlapping segments). They are here for
+#     source parity, not because they add information.
+#   - **ABSOLUTE LiftOver does add information.** It ships no segment file
+#     anywhere in the GDC, so its purity- and ploidy-corrected absolute copy
+#     number exists at gene level or not at all. It is also the only
+#     workflow here whose files name a single aliquot; the three ASCAT
+#     workflows are paired and name two.
+#
+# The three ASCAT workflows leave `min_copy_number` / `max_copy_number` equal
+# to `copy_number` except where a gene straddles a segment boundary. Genes on
+# chrM are absent from every file — the copy number callers exclude the
+# mitochondrial genome — so 37 of `gene_model`'s 60,660 genes never appear.
+TABULAR_GENE_LEVEL_CNV_FIELDS: list[pa.Field] = [
+    *_CASE_FKS,
+    *_SAMPLE_FKS,
+    *_ALIQUOT_FKS,
+    # ASCAT is paired; ABSOLUTE LiftOver is not and leaves these null.
+    pa.field("matched_normal_aliquot_id", pa.string()),
+    pa.field("matched_normal_aliquot_submitter_id", pa.string()),
+    # "ASCAT2" | "ASCAT3" | "AscatNGS" | "ABSOLUTE LiftOver".
+    pa.field("workflow_type", pa.string()),
+    pa.field("experimental_strategy", pa.string()),
+    pa.field("source_file_id", pa.string()),
+    # Join key into `gene_model`.
+    pa.field("gene_id", pa.string()),
+    # Null where the caller made no call for the gene (6,117 of 60,623 genes
+    # in a typical ABSOLUTE file, ~800 in an ASCAT3 one).
+    pa.field("copy_number", pa.int32()),
+    pa.field("min_copy_number", pa.int32()),
+    pa.field("max_copy_number", pa.int32()),
+]
+
+
+# SeSAMe level-3 methylation betas, one row per (aliquot, probe).
+#
+# The source is a headerless two-column TXT — probe id and beta — so unlike
+# expression and gene-level copy number there is no repeated annotation to
+# normalize away: GDC ships no probe coordinates, no gene mapping, nothing
+# but the two columns. `probe_id` therefore stays, and the only lever on
+# size is row-group sizing against the ~486k probe cardinality.
+#
+# `platform` is a first-class column, not provenance trivia. TCGA spans
+# three array generations with different probe sets — Illumina 450k (9,812
+# files), 27k (2,662) and EPIC v2 (53) — and a beta value is only
+# comparable to another measured on the same platform. A query that pools
+# platforms without saying so is comparing different assays.
+#
+# Beta is the fraction of methylated signal, in [0, 1]. Nulls are real and
+# common (14.6% of probes in a typical 450k file): SeSAMe masks probes it
+# cannot trust rather than emitting a number, so a null means "masked", not
+# "zero methylation".
+TABULAR_METHYLATION_FIELDS: list[pa.Field] = [
+    *_CASE_FKS,
+    *_SAMPLE_FKS,
+    *_ALIQUOT_FKS,
+    # "illumina human methylation 450" | "... 27" | "illumina methylation epic v2".
+    pa.field("platform", pa.string()),
+    pa.field("source_file_id", pa.string()),
+    # Illumina probe id: `cg` CpG, `ch` non-CpG, `ct` control, `rs` SNP.
+    pa.field("probe_id", pa.string()),
+    pa.field("beta_value", pa.float64()),
+]
+
+
+# miRNA isoform-level quantification — one row per (aliquot, isoform).
+#
+# The per-isoform companion to `mirna_expression_quantification`, from the
+# same BCGSC run over the same aliquots: that table gives one number per
+# mature miRNA, this one splits it across the distinct read pileups that
+# were collapsed into it. Roughly 4,500 isoforms per aliquot against ~1,881
+# mature miRNAs.
+TABULAR_ISOFORM_EXPRESSION_FIELDS: list[pa.Field] = [
+    *_CASE_FKS,
+    *_SAMPLE_FKS,
+    *_ALIQUOT_FKS,
+    pa.field("source_file_id", pa.string()),
+    pa.field("mirna_id", pa.string()),
+    # Genomic span of the isoform, as written: "hg38:chr9:94175942-94175961:+".
+    pa.field("isoform_coords", pa.string()),
+    pa.field("read_count", pa.int64()),
+    pa.field("reads_per_million_mirna_mapped", pa.float64()),
+    # Source header is `cross-mapped`; the hyphen is not a legal SQL
+    # identifier, so it is underscored here as it is in the miRNA table.
+    pa.field("cross_mapped", pa.string()),
+    # "precursor" | "mature,MIMAT..." | "stemloop" | "unannotated" — which
+    # part of the hairpin the reads landed on, with the miRBase accession
+    # appended where there is one.
+    pa.field("mirna_region", pa.string()),
+]
+
+
+# The GENCODE v36 gene model, once per dataset rather than once per row.
+#
+# Every project dataset carries its own copy so it stays a standalone
+# artifact — at 60,660 rows it costs ~1.25 MiB, which is cheaper than any
+# cross-dataset dependency would be. It is referenced by `gene_id` from
+# `gene_expression_quantification` and `gene_level_copy_number`.
+#
+# Assembled from the two GDC sources that each carry half of it, so nothing
+# here is invented: `gene_name` / `gene_type` come from the STAR expression
+# TSVs, `chromosome` / `start` / `end` from the gene-level copy number TSVs.
+# The 37 chrM genes appear only in expression, so they carry a `gene_name`
+# and `gene_type` but null coordinates rather than coordinates borrowed from
+# outside the GDC. Where both sources name a gene they agree exactly
+# (verified across all 60,623 shared genes).
+TABULAR_GENE_MODEL_FIELDS: list[pa.Field] = [
+    pa.field("gene_id", pa.string()),
+    pa.field("gene_name", pa.string()),
+    # Present only for genes the STAR expression files carry.
+    pa.field("gene_type", pa.string()),
+    # Null for the 37 chrM genes — see above.
+    pa.field("chromosome", pa.string()),
+    pa.field("start", pa.int64()),
+    pa.field("end", pa.int64()),
 ]
 
 
@@ -1297,6 +1849,11 @@ TABULAR_TABLES: dict[str, pa.Schema] = {
     "pathology_report": pa.schema(TABULAR_PATHOLOGY_REPORT_FIELDS),
     "allele_specific_copy_number_segment": pa.schema(TABULAR_ALLELE_SPECIFIC_CNV_FIELDS),
     "masked_copy_number_segment": pa.schema(TABULAR_MASKED_CNV_FIELDS),
+    "copy_number_segment": pa.schema(TABULAR_COPY_NUMBER_SEGMENT_FIELDS),
+    "gene_level_copy_number": pa.schema(TABULAR_GENE_LEVEL_CNV_FIELDS),
+    "gene_model": pa.schema(TABULAR_GENE_MODEL_FIELDS),
+    "methylation_beta_value": pa.schema(TABULAR_METHYLATION_FIELDS),
+    "isoform_expression_quantification": pa.schema(TABULAR_ISOFORM_EXPRESSION_FIELDS),
     "mirna_expression_quantification": pa.schema(TABULAR_MIRNA_FIELDS),
     "protein_expression_quantification": pa.schema(TABULAR_PROTEIN_EXPRESSION_FIELDS),
     # One scores + one stats table per gene-set collection. Extending to

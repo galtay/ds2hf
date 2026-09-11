@@ -335,3 +335,207 @@ def test_write_card_skips_projects_without_a_parquet(tmp_path: Path) -> None:
 
     assert "config_name: TCGA-CHOL" in front
     assert "TCGA-DLBC" not in front
+
+
+# ---------------------------------------------------------------------------
+# Full `/cases` expansion coverage
+#
+# GDC exposes 41 expandable groups; we request all of them except the
+# `files.*` subtree. That does not fit in one request — the API silently
+# truncates a long `expand` list, returning 200 with an empty `hits` — so the
+# fetch is two calls merged on `case_id`. These tests pin the merge and, more
+# importantly, the guard against that silent failure.
+# ---------------------------------------------------------------------------
+
+
+class _FakeClient:
+    """Records each `cases()` call and replays canned halves."""
+
+    def __init__(self, clinical_hits: list[dict], biospecimen_hits: list[dict]) -> None:
+        self._clinical = clinical_hits
+        self._biospecimen = biospecimen_hits
+        self.calls: list[list[str]] = []
+
+    def cases(self, filters, fields, expand, page_size):  # noqa: ANN001
+        self.calls.append(expand)
+        return self._clinical if "demographic" in expand else self._biospecimen
+
+
+def test_expansions_cover_every_non_file_group() -> None:
+    """The two lists must partition the non-`files` groups, with no overlap."""
+    both = clinical.CLINICAL_EXPANSIONS + clinical.BIOSPECIMEN_EXPANSIONS
+    assert len(both) == len(set(both)), "an expansion is listed twice"
+    assert clinical.EXPANSIONS == both
+    # Biospecimen groups are exactly the `samples*` ones.
+    assert all(e.startswith("samples") for e in clinical.BIOSPECIMEN_EXPANSIONS)
+    assert not any(e.startswith("samples") for e in clinical.CLINICAL_EXPANSIONS)
+    # Neither half may exceed the measured API ceiling of 21 groups.
+    assert len(clinical.CLINICAL_EXPANSIONS) <= 21
+    assert len(clinical.BIOSPECIMEN_EXPANSIONS) <= 21
+    # `files.*` stays out: it is ~12x the payload and duplicates `files`.
+    assert not any(e.startswith("files") for e in both)
+
+
+def test_fetch_clinical_merges_the_two_halves() -> None:
+    client = _FakeClient(
+        clinical_hits=[
+            {
+                "case_id": "c1",
+                "submitter_id": "TCGA-XX-0001",
+                "demographic": {"gender": "female"},
+            }
+        ],
+        biospecimen_hits=[{"case_id": "c1", "samples": [{"sample_id": "s1"}]}],
+    )
+    merged = clinical.fetch_clinical(["TCGA-XYZ"], client)
+    assert len(client.calls) == 2
+    assert len(merged) == 1
+    row = merged[0]
+    # Both halves land on the same record.
+    assert row["demographic"] == {"gender": "female"}
+    assert row["samples"] == [{"sample_id": "s1"}]
+
+
+def test_fetch_clinical_raises_when_one_half_comes_back_empty() -> None:
+    """The signature of GDC silently truncating an over-long `expand`.
+
+    Returning the clinical half alone would ship a dataset whose every case
+    has no biospecimen tree, with nothing in the logs to say so.
+    """
+    client = _FakeClient(
+        clinical_hits=[{"case_id": "c1", "demographic": {}}],
+        biospecimen_hits=[],
+    )
+    with pytest.raises(RuntimeError, match="silently truncated"):
+        clinical.fetch_clinical(["TCGA-XYZ"], client)
+
+
+def test_no_cases_at_all_is_not_an_error() -> None:
+    """A project with genuinely zero cases returns empty, not a raise."""
+    client = _FakeClient(clinical_hits=[], biospecimen_hits=[])
+    assert clinical.fetch_clinical(["TCGA-XYZ"], client) == []
+
+
+def test_newly_expanded_entities_land_on_the_row() -> None:
+    """Each new expansion is picked into the row at its own level."""
+    case = {
+        "case_id": "c1",
+        "submitter_id": "TCGA-XX-0001",
+        "project": {"project_id": "TCGA-XYZ", "program": {"name": "TCGA", "program_id": "p1"}},
+        "annotations": [{"annotation_id": "a1", "category": "Item is noncanonical"}],
+        "tissue_source_site": {"tissue_source_site_id": "t1", "code": "4G", "name": "Sapienza"},
+        "summary": {
+            "file_count": 55,
+            "file_size": 123,
+            "data_categories": [{"data_category": "Clinical", "file_count": 10}],
+            "experimental_strategies": [{"experimental_strategy": "WXS", "file_count": 16}],
+        },
+        "diagnoses": [
+            {
+                "diagnosis_id": "d1",
+                "annotations": [{"annotation_id": "a2"}],
+                "pathology_details": [{"pathology_detail_id": "pd1", "percent_tumor_nuclei": 80.0}],
+            }
+        ],
+        "follow_ups": [
+            {
+                "follow_up_id": "f1",
+                "molecular_tests": [{"molecular_test_id": "m1", "gene_symbol": "IDH1"}],
+                "other_clinical_attributes": [
+                    {"other_clinical_attribute_id": "o1", "risk_factors": ["Alcohol"]}
+                ],
+            }
+        ],
+        "samples": [
+            {
+                "sample_id": "s1",
+                "annotations": [{"annotation_id": "a3"}],
+                "portions": [
+                    {
+                        "portion_id": "p1",
+                        "center": {"center_id": "ce1", "name": "BCR"},
+                        "slides": [{"slide_id": "sl1", "percent_tumor_cells": 20.0}],
+                        "analytes": [
+                            {
+                                "analyte_id": "an1",
+                                "aliquots": [
+                                    {
+                                        "aliquot_id": "al1",
+                                        "center": {"center_id": "ce2", "name": "Broad"},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    row = clinical.to_patient_rows([case])[0]
+
+    assert row["annotations"][0]["category"] == "Item is noncanonical"
+    assert row["tissue_source_site"]["code"] == "4G"
+    assert row["program"]["name"] == "TCGA"
+    assert row["summary"]["file_count"] == 55
+    assert row["summary"]["data_categories"][0]["data_category"] == "Clinical"
+
+    dx = row["diagnoses"][0]
+    assert dx["annotations"][0]["annotation_id"] == "a2"
+    assert dx["pathology_details"][0]["percent_tumor_nuclei"] == 80.0
+
+    fu = row["follow_ups"][0]
+    assert fu["molecular_tests"][0]["gene_symbol"] == "IDH1"
+    # GDC types this `keyword` but returns an array; the schema must match.
+    assert fu["other_clinical_attributes"][0]["risk_factors"] == ["Alcohol"]
+
+    sample = row["samples"][0]
+    assert sample["annotations"][0]["annotation_id"] == "a3"
+    portion = sample["portions"][0]
+    assert portion["center"]["name"] == "BCR"
+    assert portion["slides"][0]["percent_tumor_cells"] == 20.0
+    assert portion["analytes"][0]["aliquots"][0]["center"]["name"] == "Broad"
+
+
+def test_expanded_row_conforms_to_the_published_cases_schema() -> None:
+    """A row with every new entity populated must fit TABULAR_TABLES['cases']."""
+    import pyarrow as pa
+    from tcga2hf.schema import TABULAR_TABLES
+    from tcga2hf_pipeline import tabular
+
+    case = {
+        "case_id": "c1",
+        "submitter_id": "TCGA-XX-0001",
+        "project": {"project_id": "TCGA-XYZ", "program": {"name": "TCGA"}},
+        "annotations": [{"annotation_id": "a1"}],
+        "tissue_source_site": {"tissue_source_site_id": "t1", "code": "4G"},
+        "summary": {
+            "file_count": 1,
+            "file_size": 2,
+            "data_categories": [],
+            "experimental_strategies": [],
+        },
+        "diagnoses": [
+            {
+                "diagnosis_id": "d1",
+                "pathology_details": [{"pathology_detail_id": "pd1"}],
+            }
+        ],
+        "follow_ups": [
+            {
+                "follow_up_id": "f1",
+                "molecular_tests": [{"molecular_test_id": "m1"}],
+                "other_clinical_attributes": [
+                    {
+                        "other_clinical_attribute_id": "o1",
+                        "risk_factors": ["Alcohol"],
+                        "comorbidities": ["Diabetes"],
+                        "viral_hepatitis_serology_tests": ["HBV"],
+                    }
+                ],
+            }
+        ],
+        "samples": [],
+    }
+    rows = tabular._cases_rows([case])
+    table = pa.Table.from_pylist(rows, schema=TABULAR_TABLES["cases"])
+    assert table.num_rows == 1

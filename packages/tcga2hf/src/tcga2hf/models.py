@@ -57,6 +57,8 @@ from tcga2hf.schema import (
     ALIQUOT_FIELDS,
     ALLELE_SPECIFIC_CNV_FIELDS,
     ANALYTE_FIELDS,
+    ANNOTATION_FIELDS,
+    CENTER_FIELDS,
     DEMOGRAPHIC_FIELDS,
     DIAGNOSIS_FIELDS,
     EXPOSURE_FIELDS,
@@ -65,14 +67,20 @@ from tcga2hf.schema import (
     FOLLOW_UP_FIELDS,
     MASKED_CNV_FIELDS,
     MIRNA_FIELDS,
+    MOLECULAR_TEST_FIELDS,
     MUTATION_FIELDS,
+    OTHER_CLINICAL_ATTRIBUTE_FIELDS,
+    PATHOLOGY_DETAIL_FIELDS,
     PATHOLOGY_REPORT_FIELDS,
     PATIENT_FIELDS,
     PORTION_FIELDS,
+    PROGRAM_FIELDS,
     PROTEIN_EXPRESSION_FIELDS,
     SAMPLE_FIELDS,
+    SLIDE_FIELDS,
     SSGSEA_COLLECTIONS,
     SSGSEA_FIELDS,
+    TISSUE_SOURCE_SITE_FIELDS,
     TREATMENT_FIELDS,
 )
 
@@ -162,24 +170,53 @@ def _make_entity(
 
 
 # ---------------------------------------------------------------------------
+# Leaf entities shared across the hierarchy.
+#
+# `Annotation` hangs off six different levels (case, diagnosis, sample,
+# portion, analyte, aliquot) and `Center` off two, so both are generated
+# before anything that references them.
+# ---------------------------------------------------------------------------
+
+
+Annotation = _make_entity("Annotation", ANNOTATION_FIELDS)
+Center = _make_entity("Center", CENTER_FIELDS)
+Slide = _make_entity("Slide", SLIDE_FIELDS)
+
+_ANNOTATIONS_OVERRIDE = {"annotations": (list[Annotation], Field(default_factory=list))}
+
+
+# ---------------------------------------------------------------------------
 # Biospecimen hierarchy: case → samples → portions → analytes → aliquots
 # Generated bottom-up so each parent can reference the typed child class.
 # ---------------------------------------------------------------------------
 
 
-Aliquot = _make_entity("Aliquot", ALIQUOT_FIELDS, required=("aliquot_id",))
+Aliquot = _make_entity(
+    "Aliquot",
+    ALIQUOT_FIELDS,
+    overrides={**_ANNOTATIONS_OVERRIDE, "center": (Center | None, None)},
+    required=("aliquot_id",),
+)
 
 Analyte = _make_entity(
     "Analyte",
     ANALYTE_FIELDS,
-    overrides={"aliquots": (list[Aliquot], Field(default_factory=list))},
+    overrides={
+        **_ANNOTATIONS_OVERRIDE,
+        "aliquots": (list[Aliquot], Field(default_factory=list)),
+    },
     required=("analyte_id",),
 )
 
 Portion = _make_entity(
     "Portion",
     PORTION_FIELDS,
-    overrides={"analytes": (list[Analyte], Field(default_factory=list))},
+    overrides={
+        **_ANNOTATIONS_OVERRIDE,
+        "center": (Center | None, None),
+        "slides": (list[Slide], Field(default_factory=list)),
+        "analytes": (list[Analyte], Field(default_factory=list)),
+    },
     required=("portion_id",),
 )
 
@@ -188,7 +225,10 @@ Portion = _make_entity(
 _SampleBase = _make_entity(
     "_SampleBase",
     SAMPLE_FIELDS,
-    overrides={"portions": (list[Portion], Field(default_factory=list))},
+    overrides={
+        **_ANNOTATIONS_OVERRIDE,
+        "portions": (list[Portion], Field(default_factory=list)),
+    },
     required=("sample_id",),
 )
 
@@ -229,12 +269,33 @@ class Sample(_SampleBase):
 
 Demographic = _make_entity("Demographic", DEMOGRAPHIC_FIELDS)
 Treatment = _make_entity("Treatment", TREATMENT_FIELDS)
+PathologyDetail = _make_entity("PathologyDetail", PATHOLOGY_DETAIL_FIELDS)
+MolecularTest = _make_entity("MolecularTest", MOLECULAR_TEST_FIELDS)
+OtherClinicalAttribute = _make_entity(
+    "OtherClinicalAttribute", OTHER_CLINICAL_ATTRIBUTE_FIELDS
+)
+Program = _make_entity("Program", PROGRAM_FIELDS)
+TissueSourceSite = _make_entity("TissueSourceSite", TISSUE_SOURCE_SITE_FIELDS)
 Diagnosis = _make_entity(
     "Diagnosis",
     DIAGNOSIS_FIELDS,
-    overrides={"treatments": (list[Treatment], Field(default_factory=list))},
+    overrides={
+        **_ANNOTATIONS_OVERRIDE,
+        "treatments": (list[Treatment], Field(default_factory=list)),
+        "pathology_details": (list[PathologyDetail], Field(default_factory=list)),
+    },
 )
-FollowUp = _make_entity("FollowUp", FOLLOW_UP_FIELDS)
+FollowUp = _make_entity(
+    "FollowUp",
+    FOLLOW_UP_FIELDS,
+    overrides={
+        "molecular_tests": (list[MolecularTest], Field(default_factory=list)),
+        "other_clinical_attributes": (
+            list[OtherClinicalAttribute],
+            Field(default_factory=list),
+        ),
+    },
+)
 Exposure = _make_entity("Exposure", EXPOSURE_FIELDS)
 FamilyHistory = _make_entity("FamilyHistory", FAMILY_HISTORY_FIELDS)
 
@@ -621,6 +682,14 @@ _TcgaHfPatientBase = _make_entity(
     "_TcgaHfPatientBase",
     PATIENT_FIELDS,
     overrides={
+        **_ANNOTATIONS_OVERRIDE,
+        "tissue_source_site": (TissueSourceSite | None, None),
+        "program": (Program | None, None),
+        # GDC's own per-case file tallies. Left as a plain dict rather than
+        # a generated entity: the two inner lists are anonymous two-field
+        # structs with no id of their own, so a typed class would add names
+        # the GDC does not use.
+        "summary": (dict[str, Any] | None, None),
         "demographic": (Demographic | None, None),
         "diagnoses": (list[Diagnosis], Field(default_factory=list)),
         "follow_ups": (list[FollowUp], Field(default_factory=list)),

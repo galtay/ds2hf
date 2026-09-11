@@ -38,6 +38,11 @@ FILE_FIELDS: list[str] = [
     "data_format",
     "experimental_strategy",
     "analysis.workflow_type",
+    # Needed to tell the methylation array generations apart: TCGA ships
+    # Illumina 450k (9,812 files), 27k (2,662) and EPIC v2 (53), and their
+    # probe sets differ, so a beta value is only comparable within a
+    # platform. Harmless for every other modality.
+    "platform",
     "cases.case_id",
     "cases.submitter_id",
     "cases.samples.portions.analytes.aliquots.aliquot_id",
@@ -116,6 +121,66 @@ MODALITY_FILTERS: dict[str, dict[str, str]] = {
     "Masked Copy Number Segment": {
         "data_format": "TXT",
         "data_category": "Copy Number Variation",
+    },
+    # The unmasked counterpart of the two above, and the one data_type whose
+    # workflows are not interchangeable at the parser level:
+    #
+    #   - DNAcopy (22,629 files) writes the same six columns as the masked
+    #     type over the very same aliquots — the only difference is that
+    #     germline CNV segments are still present.
+    #   - GATK4 CNV (10,722 files) is WGS rather than Genotyping Array, and
+    #     writes `GDC_Aliquot_ID` holding a *barcode* where every other seg
+    #     file writes `GDC_Aliquot` holding a UUID. Its chromosomes are
+    #     `chr`-prefixed and it is a paired caller (two aliquot entities).
+    #
+    # So `analysis.workflow_type` is pinned by the caller via `extra_filters`
+    # and each workflow lands in its own raw directory.
+    "Copy Number Segment": {
+        "data_format": "TXT",
+        "data_category": "Copy Number Variation",
+    },
+    # All four workflows (ASCAT2, ASCAT3, AscatNGS, ABSOLUTE LiftOver) write
+    # an identical eight-column projection onto the same GENCODE v36 gene
+    # model, so unlike `Copy Number Segment` they share one directory and one
+    # manifest, with `workflow_type` carried as a column — the same treatment
+    # `Allele-specific Copy Number Segment` gives its three callers.
+    #
+    # ABSOLUTE LiftOver is the reason this data_type is fetched at all: it
+    # ships no segment file anywhere in the GDC, so it is the only copy
+    # number source that cannot be reconstructed from data we already hold.
+    "Gene Level Copy Number": {
+        "data_format": "TSV",
+        "data_category": "Copy Number Variation",
+    },
+    # SeSAMe level-3 betas. One headerless two-column TXT per aliquot:
+    # probe id, beta. `platform` is deliberately unpinned and carried as a
+    # column instead — the three array generations have different probe
+    # sets, so pinning one would silently drop the others.
+    "Methylation Beta Value": {
+        "data_format": "TXT",
+        "data_category": "DNA Methylation",
+        "experimental_strategy": "Methylation Array",
+        "analysis.workflow_type": "SeSAMe Methylation Beta Estimation",
+    },
+    # miRNA isoform-level quantification — the per-isoform companion to
+    # `miRNA Expression Quantification`, from the same BCGSC run. Like that
+    # modality it does NOT pin `data_format`: 11,082 files are TXT and 359
+    # are TSV (the older Genome Analyzer platform), with identical columns.
+    # The two BCR supplement data types span several serializations of the
+    # same underlying submission — a project-level `bcr biotab` TSV plus
+    # per-case XML. `data_format` is therefore NOT pinned here; the caller
+    # passes it, so each serialization lands in its own raw directory.
+    # `data_category` is the only safe lock.
+    "Clinical Supplement": {
+        "data_category": "Clinical",
+    },
+    "Biospecimen Supplement": {
+        "data_category": "Biospecimen",
+    },
+    "Isoform Expression Quantification": {
+        "data_category": "Transcriptome Profiling",
+        "experimental_strategy": "miRNA-Seq",
+        "analysis.workflow_type": "BCGSC miRNA Profiling",
     },
 }
 
@@ -233,6 +298,7 @@ def fetch_files(
                 "data_type": hit.get("data_type"),
                 "data_format": hit.get("data_format"),
                 "experimental_strategy": hit.get("experimental_strategy"),
+                "platform": hit.get("platform"),
                 "workflow_type": analysis.get("workflow_type"),
                 "access": hit.get("access"),
                 "gdc_version": version.get("version"),
@@ -248,3 +314,55 @@ def fetch_files(
 
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
+
+
+def fetch_file_index(client: GDCClient, project_id: str, out_path: Path) -> list[dict[str, Any]]:
+    """Write the project's complete open-access file list to `out_path`.
+
+    This is what lets the `files` table describe the project's whole GDC
+    footprint rather than only the parts we downloaded. It is a listing, not
+    a download: no bytes are fetched, so it costs one paged `/files` query
+    plus the version lookups regardless of how large the excluded modalities
+    are (TCGA-CHOL's 110 whole-slide images are 88.6 GiB and appear here as
+    110 rows).
+
+    Controlled-access files are deliberately not listed. A row carrying a
+    download URL nobody reading an open dataset can use would be noise, and
+    `cases.summary.data_categories` already reports that controlled data
+    exists for a case.
+    """
+    clauses = [
+        eq("cases.project.project_id", project_id),
+        eq("access", "open"),
+    ]
+    hits = client.files(filters=and_(*clauses), fields=FILE_FIELDS, page_size=500)
+    versions = client.versions([h["file_id"] for h in hits]) if hits else {}
+
+    index: list[dict[str, Any]] = []
+    for hit in hits:
+        version = versions.get(hit["file_id"], {})
+        analysis = hit.get("analysis") or {}
+        index.append(
+            {
+                "file_id": hit["file_id"],
+                "file_name": hit["file_name"],
+                "file_size": hit.get("file_size"),
+                "md5sum": hit.get("md5sum"),
+                "data_category": hit.get("data_category"),
+                "data_type": hit.get("data_type"),
+                "data_format": hit.get("data_format"),
+                "experimental_strategy": hit.get("experimental_strategy"),
+                "platform": hit.get("platform"),
+                "workflow_type": analysis.get("workflow_type"),
+                "access": hit.get("access"),
+                "gdc_version": version.get("version"),
+                "gdc_first_release": version.get("release"),
+                "gdc_superseded": bool(
+                    version and version.get("latest_id") not in (None, hit["file_id"])
+                ),
+                "cases": hit.get("cases", []),
+            }
+        )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(index, indent=2))
+    return index

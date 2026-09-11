@@ -308,3 +308,294 @@ def test_rows_satisfy_the_tabular_schemas(tmp_path: Path) -> None:
         built = pa.Table.from_pylist(rows, schema=TABULAR_TABLES[table])
         assert built.num_rows == len(rows)
         assert built.schema.equals(TABULAR_TABLES[table])
+
+
+# ---------------------------------------------------------------------------
+# Unmasked segments (`copy_number_segment`) — two workflows, one table
+#
+# DNAcopy is single-aliquot with a UUID in `GDC_Aliquot`; GATK4 CNV is paired
+# with a *barcode* in `GDC_Aliquot_ID`. The barcode is the only thing that
+# distinguishes tumour from matched normal in a GATK4 file, and it has to be
+# matched against `entity_submitter_id` rather than parsed for sample-type
+# digits — that is what these tests pin.
+# ---------------------------------------------------------------------------
+
+_UNMASKED_DNACOPY_TSV = (
+    "GDC_Aliquot\tChromosome\tStart\tEnd\tNum_Probes\tSegment_Mean\n"
+    f"{_TUMOR_ALIQUOT}\t1\t62920\t668210\t21\t0.2874\n"
+    f"{_TUMOR_ALIQUOT}\t1\t771719\t2853893\t522\t-0.1598\n"
+)
+
+_GATK4_TSV = (
+    "GDC_Aliquot_ID\tChromosome\tStart\tEnd\tNum_Probes\tSegment_Mean\n"
+    "TCGA-W5-AA33-01A-11D-A416-01\tchr1\t17001\t828000\t59\t0.206868\n"
+    "TCGA-W5-AA33-01A-11D-A416-01\tchr1\t828001\t4846000\t3809\t-0.336467\n"
+)
+
+
+def _dnacopy_project(tmp_path: Path, **kwargs) -> Path:
+    return _build_project(
+        tmp_path,
+        modality="copy_number_segment_dnacopy",
+        file_name="NULLS_p_TCGA.grch38.seg.v2.txt",
+        content=_UNMASKED_DNACOPY_TSV,
+        entities=[
+            {
+                "entity_id": _TUMOR_ALIQUOT,
+                "entity_type": "aliquot",
+                "entity_submitter_id": "TCGA-W5-AA33-01A-11D-A416-01",
+            }
+        ],
+        workflow_type="DNAcopy",
+        experimental_strategy="Genotyping Array",
+        **kwargs,
+    )
+
+
+def _gatk4_project(tmp_path: Path, **kwargs) -> Path:
+    return _build_project(
+        tmp_path,
+        modality="copy_number_segment_gatk4",
+        file_name="uuid_wgs_gdc_realn.cr.igv.reheader.seg.txt",
+        content=_GATK4_TSV,
+        entities=_paired_entities(),
+        workflow_type="GATK4 CNV",
+        experimental_strategy="WGS",
+        **kwargs,
+    )
+
+
+def test_unmasked_dnacopy_rows_resolve_from_gdc_aliquot(tmp_path: Path) -> None:
+    rows = tabular._copy_number_segment_rows([_case()], _dnacopy_project(tmp_path))
+    assert len(rows) == 2
+    first = rows[0]
+    assert first["aliquot_id"] == _TUMOR_ALIQUOT
+    assert first["sample_id"] == _SAMPLE_UUID
+    assert first["workflow_type"] == "DNAcopy"
+    assert first["experimental_strategy"] == "Genotyping Array"
+    # Single-aliquot workflow: no matched normal to report.
+    assert first["matched_normal_aliquot_id"] is None
+    assert first["matched_normal_aliquot_submitter_id"] is None
+    # Bare chromosome names in this workflow, carried as written.
+    assert first["chromosome"] == "1"
+    assert (first["num_probes"], first["segment_mean"]) == (21, 0.2874)
+
+
+def test_gatk4_tumor_resolved_by_barcode_not_entity_order(tmp_path: Path) -> None:
+    rows = tabular._copy_number_segment_rows([_case()], _gatk4_project(tmp_path))
+    assert len(rows) == 2
+    first = rows[0]
+    # The normal is listed first in associated_entities; the barcode in the
+    # file's own column is what decides, so the tumour must still win.
+    assert first["aliquot_id"] == _TUMOR_ALIQUOT
+    assert first["matched_normal_aliquot_id"] == _NORMAL_ALIQUOT
+    assert first["matched_normal_aliquot_submitter_id"] == "TCGA-W5-AA33-10A-01D-A419-01"
+    assert first["workflow_type"] == "GATK4 CNV"
+    assert first["experimental_strategy"] == "WGS"
+    # `chr`-prefixed in this workflow, unlike DNAcopy above.
+    assert first["chromosome"] == "chr1"
+
+
+def test_gatk4_file_whose_barcode_matches_no_entity_is_skipped(tmp_path: Path) -> None:
+    project = _build_project(
+        tmp_path,
+        modality="copy_number_segment_gatk4",
+        file_name="uuid_wgs_gdc_realn.cr.igv.reheader.seg.txt",
+        content=_GATK4_TSV.replace("TCGA-W5-AA33-01A-11D-A416-01", "TCGA-ZZ-9999-01A-11D-XXXX-01"),
+        entities=_paired_entities(),
+        workflow_type="GATK4 CNV",
+    )
+    assert tabular._copy_number_segment_rows([_case()], project) == []
+
+
+def test_both_unmasked_workflows_union_into_one_table(tmp_path: Path) -> None:
+    project = _dnacopy_project(tmp_path)
+    _gatk4_project(tmp_path)  # same project dir, second modality
+    rows = tabular._copy_number_segment_rows([_case()], project)
+    assert len(rows) == 4
+    assert {r["workflow_type"] for r in rows} == {"DNAcopy", "GATK4 CNV"}
+    pa.Table.from_pylist(rows, schema=TABULAR_TABLES["copy_number_segment"])
+
+
+# ---------------------------------------------------------------------------
+# Gene-level copy number
+#
+# The three ASCAT workflows are paired but their TSVs carry no aliquot column,
+# so the tumour is recovered from the matching allele-specific segment file.
+# ABSOLUTE LiftOver names one aliquot and needs no such lookup.
+# ---------------------------------------------------------------------------
+
+_GENE_LEVEL_TSV = (
+    "gene_id\tgene_name\tchromosome\tstart\tend\tcopy_number\tmin_copy_number\tmax_copy_number\n"
+    "ENSG00000223972.5\tDDX11L1\tchr1\t11869\t14409\t2\t2\t2\n"
+    "ENSG00000227232.5\tWASH7P\tchr1\t14404\t29570\t3\t2\t3\n"
+    "ENSG00000278267.1\tMIR6859-1\tchr1\t17369\t17436\t\t\t\n"
+)
+
+
+def _gene_level_project(tmp_path: Path, *, workflow: str, entities: list[dict]) -> Path:
+    return _build_project(
+        tmp_path,
+        modality="gene_level_copy_number",
+        file_name=f"TCGA-CHOL.aliquot.{workflow}.gene_level_copy_number.v36.tsv",
+        content=_GENE_LEVEL_TSV,
+        entities=entities,
+        workflow_type=workflow,
+        experimental_strategy="Genotyping Array",
+    )
+
+
+def _gene_level_rows(cases: list[dict], project: Path) -> list[dict]:
+    batches = list(tabular._gene_level_copy_number_batches(cases, project))
+    return [row for b in batches for row in b.to_pylist()]
+
+
+def test_absolute_gene_level_needs_no_pair_lookup(tmp_path: Path) -> None:
+    """ABSOLUTE ships no segment file, so it must resolve on its own."""
+    project = _gene_level_project(
+        tmp_path,
+        workflow="ABSOLUTE LiftOver",
+        entities=[
+            {
+                "entity_id": _TUMOR_ALIQUOT,
+                "entity_type": "aliquot",
+                "entity_submitter_id": "TCGA-W5-AA33-01A-11D-A416-01",
+            }
+        ],
+    )
+    rows = _gene_level_rows([_case()], project)
+    assert len(rows) == 3
+    assert rows[0]["aliquot_id"] == _TUMOR_ALIQUOT
+    assert rows[0]["sample_id"] == _SAMPLE_UUID
+    assert rows[0]["matched_normal_aliquot_id"] is None
+    assert rows[0]["gene_id"] == "ENSG00000223972.5"
+    assert (rows[1]["copy_number"], rows[1]["min_copy_number"]) == (3, 2)
+    # Uncalled genes stay null rather than becoming 0.
+    assert rows[2]["copy_number"] is None
+    # gene_name / coordinates live in `gene_model`, not here.
+    assert "gene_name" not in rows[0]
+
+
+def test_paired_gene_level_resolves_tumor_via_segment_file(tmp_path: Path) -> None:
+    _allele_specific_project(tmp_path)  # ASCAT3 seg file naming the tumour
+    project = _gene_level_project(
+        tmp_path, workflow="ASCAT3", entities=_paired_entities()
+    )
+    rows = _gene_level_rows([_case()], project)
+    assert len(rows) == 3
+    assert rows[0]["aliquot_id"] == _TUMOR_ALIQUOT
+    assert rows[0]["matched_normal_aliquot_id"] == _NORMAL_ALIQUOT
+    assert rows[0]["workflow_type"] == "ASCAT3"
+
+
+def test_paired_gene_level_is_skipped_when_the_pair_is_unresolvable(tmp_path: Path) -> None:
+    """No allele-specific file to consult, so the tumour is unknown — skip.
+
+    Guessing from entity order or barcode digits would silently mislabel
+    every matched normal as the tumour.
+    """
+    project = _gene_level_project(
+        tmp_path, workflow="ASCAT3", entities=_paired_entities()
+    )
+    assert _gene_level_rows([_case()], project) == []
+
+
+def test_gene_level_batches_conform_to_the_published_schema(tmp_path: Path) -> None:
+    _allele_specific_project(tmp_path)
+    project = _gene_level_project(tmp_path, workflow="ASCAT3", entities=_paired_entities())
+    batches = list(tabular._gene_level_copy_number_batches([_case()], project))
+    assert batches
+    for batch in batches:
+        assert batch.schema.equals(TABULAR_TABLES["gene_level_copy_number"])
+
+
+def test_streaming_writer_round_trips_gene_level_rows(tmp_path: Path) -> None:
+    """The batch path must produce the same parquet the list path would."""
+    import pyarrow.parquet as pq
+
+    _allele_specific_project(tmp_path)
+    project = _gene_level_project(tmp_path, workflow="ASCAT3", entities=_paired_entities())
+    tables = {
+        "gene_level_copy_number": tabular._gene_level_copy_number_batches([_case()], project)
+    }
+    out = tabular.write_tables(tables, tmp_path / "processed", "TCGA-XYZ")
+    written = pq.read_table(out["gene_level_copy_number"])
+    assert written.num_rows == 3
+    assert written.schema.equals(TABULAR_TABLES["gene_level_copy_number"])
+    assert written.column("gene_id").to_pylist()[0] == "ENSG00000223972.5"
+
+
+def test_modality_with_no_files_writes_no_parquet(tmp_path: Path) -> None:
+    tables = {"gene_level_copy_number": iter(())}
+    out = tabular.write_tables(tables, tmp_path / "processed", "TCGA-XYZ")
+    assert "gene_level_copy_number" not in out
+    assert not (tmp_path / "processed" / "TCGA-XYZ" / "gene_level_copy_number").exists()
+
+
+# ---------------------------------------------------------------------------
+# Gene model — the reference table both per-gene tables join against
+# ---------------------------------------------------------------------------
+
+_EXPRESSION_TSV = (
+    "# gene-model: GENCODE v36\n"
+    "gene_id\tgene_name\tgene_type\tunstranded\ttpm_unstranded\n"
+    "N_unmapped\t\t\t100\t0\n"
+    "ENSG00000223972.5\tDDX11L1\ttranscribed_unprocessed_pseudogene\t3\t0.1\n"
+    "ENSG00000227232.5\tWASH7P\tunprocessed_pseudogene\t50\t2.5\n"
+    "ENSG00000198695.2\tMT-ND6\tprotein_coding\t900\t60.0\n"
+)
+
+
+def test_gene_model_merges_both_gdc_sources(tmp_path: Path) -> None:
+    project = _build_project(
+        tmp_path,
+        modality="expression",
+        file_name="star.rna_seq.augmented_star_gene_counts.tsv",
+        content=_EXPRESSION_TSV,
+        entities=[{"entity_id": _TUMOR_ALIQUOT, "entity_type": "aliquot"}],
+        workflow_type="STAR - Counts",
+    )
+    _gene_level_project(
+        tmp_path,
+        workflow="ABSOLUTE LiftOver",
+        entities=[{"entity_id": _TUMOR_ALIQUOT, "entity_type": "aliquot"}],
+    )
+    rows = tabular._gene_model_rows(project)
+    by_id = {r["gene_id"]: r for r in rows}
+
+    # The N_* alignment-summary rows are not genes.
+    assert not any(g.startswith("N_") for g in by_id)
+    # Union of both sources: 3 expression genes + 1 gene-level-only gene.
+    assert set(by_id) == {
+        "ENSG00000223972.5",
+        "ENSG00000227232.5",
+        "ENSG00000278267.1",
+        "ENSG00000198695.2",
+    }
+
+    # A gene in both sources gets both halves.
+    both = by_id["ENSG00000223972.5"]
+    assert both["gene_name"] == "DDX11L1"
+    assert both["gene_type"] == "transcribed_unprocessed_pseudogene"
+    assert (both["chromosome"], both["start"], both["end"]) == ("chr1", 11869, 14409)
+
+    # chrM genes are expression-only: named and typed, but no coordinates
+    # invented from outside the GDC.
+    mt = by_id["ENSG00000198695.2"]
+    assert mt["gene_name"] == "MT-ND6"
+    assert mt["gene_type"] == "protein_coding"
+    assert (mt["chromosome"], mt["start"], mt["end"]) == (None, None, None)
+
+    # A gene only the copy number files carry has coordinates but no type.
+    cnv_only = by_id["ENSG00000278267.1"]
+    assert cnv_only["gene_type"] is None
+    assert cnv_only["chromosome"] == "chr1"
+
+    assert [r["gene_id"] for r in rows] == sorted(by_id)
+    pa.Table.from_pylist(rows, schema=TABULAR_TABLES["gene_model"])
+
+
+def test_gene_model_is_empty_without_either_source(tmp_path: Path) -> None:
+    project = tmp_path / "TCGA-XYZ"
+    project.mkdir()
+    assert tabular._gene_model_rows(project) == []

@@ -138,28 +138,49 @@ def _mutations_rows(
     return rows
 
 
-def _expression_rows(
+def _expression_batches(
     cases: list[dict[str, Any]],
     project_raw_dir: Path,
-) -> list[dict[str, Any]]:
-    """One row per gene in each aliquot's expression TSV, with FKs prepended.
+) -> Any:
+    """Yield one `pa.RecordBatch` per aliquot's STAR expression TSV.
 
-    Concatenates the per-gene rows from every aliquot's TSV under the
-    project. The 4 N_* alignment-summary rows that sit at the top of each
-    TSV (gene_id values `N_unmapped`, `N_multimapping`, `N_noFeature`,
-    `N_ambiguous` — they have empty gene_name / gene_type and aren't real
-    genes) are filtered out: they occupy the same column shape but have
-    different semantics, and including them complicates SQL filtering.
+    Emitted as a stream for the same reason `_gene_level_copy_number_batches`
+    is: TCGA-BRCA is 1,231 aliquots x 60,660 genes = 74.7M rows, which as
+    Python dicts is tens of GB of interpreter objects held live while every
+    other table is still being built. One batch per file caps peak memory at
+    ~60k rows.
+
+    The 4 N_* alignment-summary rows at the top of each TSV (`N_unmapped`,
+    `N_multimapping`, `N_noFeature`, `N_ambiguous` — empty gene_name /
+    gene_type, and not genes) are dropped: they share the column shape but
+    not the semantics, and they complicate every downstream filter.
+
+    `gene_name` / `gene_type` are not emitted; they are invariant across
+    files and live in `gene_model`.
     """
+    import pyarrow as pa
+
+    schema = TABULAR_TABLES["gene_expression_quantification"]
     expr_dir = project_raw_dir / "expression"
     manifest_path = expr_dir / "manifest.json"
     if not manifest_path.exists():
-        return []
+        return
 
     case_index = {c.get("case_id"): c for c in cases}
-    manifest = json.loads(manifest_path.read_text())
-    rows: list[dict[str, Any]] = []
-    for entry in manifest:
+    value_columns = [
+        f.name
+        for f in schema
+        if f.name
+        not in {
+            "case_id",
+            "case_submitter_id",
+            "aliquot_id",
+            "aliquot_submitter_id",
+            "source_file_id",
+            "gene_id",
+        }
+    ]
+    for entry in json.loads(manifest_path.read_text()):
         file_path = expr_dir / entry["file_name"]
         if not file_path.exists():
             continue
@@ -169,32 +190,33 @@ def _expression_rows(
         case = case_index.get(case_id)
         if case is None:
             continue
-        df = pd.read_csv(file_path, sep="\t", comment="#", low_memory=False)
-        # Drop the 4 alignment-summary rows; keep only true gene records.
+        df = pd.read_csv(
+            file_path,
+            sep="\t",
+            comment="#",
+            usecols=["gene_id", *value_columns],
+            low_memory=False,
+        )
         df = df[~df["gene_id"].str.startswith("N_", na=False)].reset_index(drop=True)
-        a2sub = _aliquot_to_submitter(case)
-        case_submitter_id = case.get("submitter_id")
-        aliquot_submitter_id = a2sub.get(aliquot_id)
-        source_file_id = entry["file_id"]
-        for r in df.itertuples(index=False):
-            row = {
-                "case_id": case_id,
-                "case_submitter_id": case_submitter_id,
-                "aliquot_id": aliquot_id,
-                "aliquot_submitter_id": aliquot_submitter_id,
-                "source_file_id": source_file_id,
-                "gene_id": _na_to_none(r.gene_id),
-                "gene_name": _na_to_none(r.gene_name),
-                "gene_type": _na_to_none(r.gene_type),
-                "unstranded": _to_int_or_none(r.unstranded),
-                "stranded_first": _to_int_or_none(r.stranded_first),
-                "stranded_second": _to_int_or_none(r.stranded_second),
-                "tpm_unstranded": _to_float_or_none(r.tpm_unstranded),
-                "fpkm_unstranded": _to_float_or_none(r.fpkm_unstranded),
-                "fpkm_uq_unstranded": _to_float_or_none(r.fpkm_uq_unstranded),
-            }
-            rows.append(row)
-    return rows
+        if df.empty:
+            continue
+        n = len(df)
+        common = {
+            "case_id": case_id,
+            "case_submitter_id": case.get("submitter_id"),
+            "aliquot_id": aliquot_id,
+            "aliquot_submitter_id": _aliquot_to_submitter(case).get(aliquot_id),
+            "source_file_id": entry["file_id"],
+        }
+        arrays = []
+        for field in schema:
+            if field.name in common:
+                arrays.append(pa.array([common[field.name]] * n, type=field.type))
+            elif field.name == "gene_id":
+                arrays.append(pa.array(df["gene_id"].astype("string"), type=field.type))
+            else:
+                arrays.append(pa.array(df[field.name], type=field.type, from_pandas=True))
+        yield pa.RecordBatch.from_arrays(arrays, schema=schema)
 
 
 def _na_to_none(v: Any) -> Any:
@@ -428,6 +450,372 @@ def _masked_copy_number_segment_rows(
                 }
             )
     return rows
+
+
+def _seg_aliquot_barcode(df: pd.DataFrame) -> str | None:
+    """The single aliquot *barcode* a GATK4 CNV seg file reports.
+
+    GATK4 CNV is the one segment data type that names its aliquot by
+    submitter id rather than UUID, under `GDC_Aliquot_ID` rather than
+    `GDC_Aliquot`.
+    """
+    values = {v for v in df["GDC_Aliquot_ID"].dropna().unique()}
+    return next(iter(values)) if len(values) == 1 else None
+
+
+def _copy_number_segment_rows(
+    cases: list[dict[str, Any]],
+    project_raw_dir: Path,
+) -> list[dict[str, Any]]:
+    """One row per unmasked copy number segment, from both workflows.
+
+    The two workflows are read from separate raw directories because they
+    write incompatible headers, and are unioned into one table because they
+    carry the same six measurements:
+
+      - **DNAcopy** is single-aliquot with a UUID in `GDC_Aliquot`, exactly
+        like the masked type it is the unmasked counterpart of.
+      - **GATK4 CNV** is a paired WGS caller with a *barcode* in
+        `GDC_Aliquot_ID`. The tumour is resolved positively by matching that
+        barcode against the file's `associated_entities.entity_submitter_id`
+        — never by reading sample-type digits out of it — and whichever
+        other aliquot the file names is the matched normal.
+
+    Files whose aliquot column isn't a single consistent value, or whose
+    barcode doesn't match an associated entity, are skipped rather than
+    guessed at.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry, file_path, case in _iter_modality_files(
+        project_raw_dir, "copy_number_segment_dnacopy", cases
+    ):
+        df = pd.read_csv(file_path, sep="\t", low_memory=False)
+        if df.empty:
+            continue
+        aliquot_id = _seg_aliquot(df)
+        if aliquot_id is None:
+            continue
+        common = {
+            **_aliquot_fks(case, aliquot_id),
+            "matched_normal_aliquot_id": None,
+            "matched_normal_aliquot_submitter_id": None,
+            "workflow_type": entry.get("workflow_type"),
+            "experimental_strategy": entry.get("experimental_strategy"),
+            "source_file_id": entry["file_id"],
+        }
+        rows.extend(_segment_measurement_rows(df, common))
+
+    for entry, file_path, case in _iter_modality_files(
+        project_raw_dir, "copy_number_segment_gatk4", cases
+    ):
+        df = pd.read_csv(file_path, sep="\t", low_memory=False)
+        if df.empty:
+            continue
+        barcode = _seg_aliquot_barcode(df)
+        if barcode is None:
+            continue
+        entities = _aliquot_entities(entry)
+        tumor = next(
+            (e["entity_id"] for e in entities if e.get("entity_submitter_id") == barcode), None
+        )
+        if tumor is None:
+            continue
+        others = [e["entity_id"] for e in entities if e["entity_id"] != tumor]
+        normal = others[0] if len(others) == 1 else None
+        common = {
+            **_aliquot_fks(case, tumor),
+            "matched_normal_aliquot_id": normal,
+            "matched_normal_aliquot_submitter_id": _submitter_for_entity(entry, normal),
+            "workflow_type": entry.get("workflow_type"),
+            "experimental_strategy": entry.get("experimental_strategy"),
+            "source_file_id": entry["file_id"],
+        }
+        rows.extend(_segment_measurement_rows(df, common))
+    return rows
+
+
+def _segment_measurement_rows(
+    df: pd.DataFrame, common: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The per-segment columns shared by both unmasked workflows."""
+    return [
+        {
+            **common,
+            "chromosome": _na_to_none(str(r.Chromosome)),
+            "start": _to_int_or_none(r.Start),
+            "end": _to_int_or_none(r.End),
+            "num_probes": _to_int_or_none(r.Num_Probes),
+            "segment_mean": _to_float_or_none(r.Segment_Mean),
+        }
+        for r in df.itertuples(index=False)
+    ]
+
+
+def _ascat_tumor_by_pair(project_raw_dir: Path) -> dict[tuple[str, frozenset[str]], str]:
+    """Map (workflow_type, {aliquot ids}) -> tumour aliquot, from the seg files.
+
+    The three ASCAT gene-level workflows are paired and name two aliquots,
+    but — unlike every segment data type — their TSVs carry no aliquot
+    column at all, so the tumour cannot be read out of the file. Filenames
+    don't settle it either: ASCAT2 and ASCAT3 embed the tumour aliquot UUID,
+    but AscatNGS embeds a UUID that is not an aliquot at all.
+
+    What does settle it is that each paired gene-level file has exactly one
+    counterpart in `allele_specific_copy_number_segment` with the same
+    workflow and the same pair of associated aliquots, and *that* file names
+    its tumour positively in `GDC_Aliquot`. Verified on TCGA-CHOL: 114 of
+    114 paired gene-level files resolve, none ambiguous.
+
+    Returns an empty map when the allele-specific directory is absent, which
+    makes the paired gene-level files unresolvable and therefore skipped —
+    the same "skip rather than guess" contract the segment loaders honour.
+    """
+    mod_dir = project_raw_dir / "copy_number_allele_specific"
+    manifest_path = mod_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    out: dict[tuple[str, frozenset[str]], str] = {}
+    for entry in json.loads(manifest_path.read_text()):
+        file_path = mod_dir / entry["file_name"]
+        if not file_path.exists():
+            continue
+        entities = frozenset(e["entity_id"] for e in _aliquot_entities(entry))
+        if len(entities) != 2:
+            continue
+        df = pd.read_csv(file_path, sep="\t", usecols=["GDC_Aliquot"], low_memory=False)
+        tumor = _seg_aliquot(df)
+        if tumor is None or tumor not in entities:
+            continue
+        out[(entry.get("workflow_type") or "", entities)] = tumor
+    return out
+
+
+# Columns we read out of a gene-level TSV. The other four (`gene_name`,
+# `chromosome`, `start`, `end`) are identical in every file and are emitted
+# once into `gene_model` instead.
+_GENE_LEVEL_VALUE_COLUMNS = ("copy_number", "min_copy_number", "max_copy_number")
+
+
+def _gene_level_copy_number_batches(
+    cases: list[dict[str, Any]],
+    project_raw_dir: Path,
+) -> Any:
+    """Yield one `pa.RecordBatch` per gene-level copy number file.
+
+    This table is emitted as a stream of Arrow batches rather than a list of
+    dicts because of its size: TCGA-BRCA alone is 3,314 files x 60,623 genes
+    = 201M rows, which as Python dicts would be roughly 100 GB of interpreter
+    objects. One batch per file caps peak memory at ~60k rows regardless of
+    project size, and `write_tables` streams the batches straight to Parquet.
+
+    Tumour resolution differs by workflow: ABSOLUTE LiftOver files name one
+    aliquot and need none; the three ASCAT workflows are paired and resolve
+    through `_ascat_tumor_by_pair`.
+    """
+    import pyarrow as pa
+
+    schema = TABULAR_TABLES["gene_level_copy_number"]
+    tumor_by_pair = _ascat_tumor_by_pair(project_raw_dir)
+    for entry, file_path, case in _iter_modality_files(
+        project_raw_dir, "gene_level_copy_number", cases
+    ):
+        entities = _aliquot_entities(entry)
+        if len(entities) == 1:
+            tumor: str | None = entities[0]["entity_id"]
+            normal: str | None = None
+        else:
+            key = (entry.get("workflow_type") or "", frozenset(e["entity_id"] for e in entities))
+            tumor = tumor_by_pair.get(key)
+            if tumor is None:
+                continue
+            others = [e["entity_id"] for e in entities if e["entity_id"] != tumor]
+            normal = others[0] if len(others) == 1 else None
+        df = pd.read_csv(
+            file_path,
+            sep="\t",
+            usecols=["gene_id", *_GENE_LEVEL_VALUE_COLUMNS],
+            low_memory=False,
+        )
+        if df.empty:
+            continue
+        n = len(df)
+        common = {
+            **_aliquot_fks(case, tumor),
+            "matched_normal_aliquot_id": normal,
+            "matched_normal_aliquot_submitter_id": _submitter_for_entity(entry, normal),
+            "workflow_type": entry.get("workflow_type"),
+            "experimental_strategy": entry.get("experimental_strategy"),
+            "source_file_id": entry["file_id"],
+        }
+        arrays = []
+        for field in schema:
+            if field.name in common:
+                arrays.append(pa.array([common[field.name]] * n, type=field.type))
+            elif field.name == "gene_id":
+                arrays.append(pa.array(df["gene_id"].astype("string"), type=field.type))
+            else:
+                # Nullable ints: the callers leave genes uncalled (all of chrM,
+                # plus anything outside a segment), and pandas reads those as NaN.
+                arrays.append(pa.array(df[field.name], type=field.type, from_pandas=True))
+        yield pa.RecordBatch.from_arrays(arrays, schema=schema)
+
+
+def _methylation_beta_value_batches(
+    cases: list[dict[str, Any]],
+    project_raw_dir: Path,
+) -> Any:
+    """Yield one `pa.RecordBatch` per aliquot's SeSAMe beta TXT.
+
+    Streamed like the other per-probe/per-gene tables: a 450k file is
+    486,427 rows, so even TCGA-CHOL's 45 files are 21.9M rows.
+
+    The source file is **headerless** — two unnamed columns, probe id then
+    beta — so the names are supplied here rather than read. Masked probes
+    are written by SeSAMe as `NA` and land as null, which is a real value
+    meaning "not trustworthy", not zero.
+    """
+    import pyarrow as pa
+
+    schema = TABULAR_TABLES["methylation_beta_value"]
+    for entry, file_path, case in _iter_modality_files(project_raw_dir, "methylation", cases):
+        entities = _aliquot_entities(entry)
+        if len(entities) != 1:
+            continue
+        aliquot_id = entities[0]["entity_id"]
+        df = pd.read_csv(
+            file_path,
+            sep="\t",
+            header=None,
+            names=["probe_id", "beta_value"],
+            low_memory=False,
+        )
+        if df.empty:
+            continue
+        n = len(df)
+        common = {
+            **_aliquot_fks(case, aliquot_id),
+            "platform": entry.get("platform"),
+            "source_file_id": entry["file_id"],
+        }
+        arrays = []
+        for field in schema:
+            if field.name in common:
+                arrays.append(pa.array([common[field.name]] * n, type=field.type))
+            elif field.name == "probe_id":
+                arrays.append(pa.array(df["probe_id"].astype("string"), type=field.type))
+            else:
+                arrays.append(pa.array(df["beta_value"], type=field.type, from_pandas=True))
+        yield pa.RecordBatch.from_arrays(arrays, schema=schema)
+
+
+def _isoform_expression_quantification_rows(
+    cases: list[dict[str, Any]],
+    project_raw_dir: Path,
+) -> list[dict[str, Any]]:
+    """One row per (aliquot, miRNA isoform).
+
+    Single-aliquot files with a header. `cross-mapped` is underscored to
+    `cross_mapped` for the same reason it is in the miRNA table: the hyphen
+    is not a legal bare SQL identifier.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry, file_path, case in _iter_modality_files(project_raw_dir, "mirna_isoform", cases):
+        entities = _aliquot_entities(entry)
+        if len(entities) != 1:
+            continue
+        aliquot_id = entities[0]["entity_id"]
+        df = pd.read_csv(file_path, sep="\t", low_memory=False)
+        if df.empty:
+            continue
+        common = {
+            **_aliquot_fks(case, aliquot_id),
+            "source_file_id": entry["file_id"],
+        }
+        for r in df.itertuples(index=False):
+            rows.append(
+                {
+                    **common,
+                    "mirna_id": _na_to_none(r.miRNA_ID),
+                    "isoform_coords": _na_to_none(r.isoform_coords),
+                    "read_count": _to_int_or_none(r.read_count),
+                    "reads_per_million_mirna_mapped": _to_float_or_none(
+                        r.reads_per_million_miRNA_mapped
+                    ),
+                    # `cross-mapped` isn't a valid attribute name on the
+                    # namedtuple pandas yields, so it comes back positionally.
+                    "cross_mapped": _na_to_none(r[df.columns.get_loc("cross-mapped")]),
+                    "mirna_region": _na_to_none(r.miRNA_region),
+                }
+            )
+    return rows
+
+
+def _gene_model_rows(project_raw_dir: Path) -> list[dict[str, Any]]:
+    """The GENCODE v36 gene model, assembled from the two GDC sources.
+
+    `gene_name` / `gene_type` come from a STAR expression TSV and
+    `chromosome` / `start` / `end` from a gene-level copy number TSV. Both
+    halves are byte-identical across every file of their kind (the gene
+    model is fixed for v36), so one file of each is read rather than all of
+    them; `test_gene_model_is_invariant_across_files` guards that.
+
+    Genes present in only one source keep the half that exists: the 37 chrM
+    genes are expression-only and carry null coordinates rather than
+    coordinates borrowed from outside the GDC.
+    """
+    by_gene: dict[str, dict[str, Any]] = {}
+
+    expr_file = _first_modality_file(project_raw_dir, "expression")
+    if expr_file is not None:
+        df = pd.read_csv(
+            expr_file, sep="\t", comment="#", usecols=["gene_id", "gene_name", "gene_type"]
+        )
+        df = df[~df["gene_id"].str.startswith("N_", na=False)]
+        for r in df.itertuples(index=False):
+            by_gene[r.gene_id] = {
+                "gene_id": _na_to_none(r.gene_id),
+                "gene_name": _na_to_none(r.gene_name),
+                "gene_type": _na_to_none(r.gene_type),
+                "chromosome": None,
+                "start": None,
+                "end": None,
+            }
+
+    gl_file = _first_modality_file(project_raw_dir, "gene_level_copy_number")
+    if gl_file is not None:
+        df = pd.read_csv(
+            gl_file, sep="\t", usecols=["gene_id", "gene_name", "chromosome", "start", "end"]
+        )
+        for r in df.itertuples(index=False):
+            row = by_gene.setdefault(
+                r.gene_id,
+                {
+                    "gene_id": _na_to_none(r.gene_id),
+                    "gene_name": _na_to_none(r.gene_name),
+                    "gene_type": None,
+                    "chromosome": None,
+                    "start": None,
+                    "end": None,
+                },
+            )
+            row["chromosome"] = _na_to_none(r.chromosome)
+            row["start"] = _to_int_or_none(r.start)
+            row["end"] = _to_int_or_none(r.end)
+
+    return sorted(by_gene.values(), key=lambda r: r["gene_id"] or "")
+
+
+def _first_modality_file(project_raw_dir: Path, modality_dir: str) -> Path | None:
+    """The first downloaded file in a modality dir, in manifest order."""
+    mod_dir = project_raw_dir / modality_dir
+    manifest_path = mod_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    for entry in json.loads(manifest_path.read_text()):
+        file_path = mod_dir / entry["file_name"]
+        if file_path.exists():
+            return file_path
+    return None
 
 
 def _mirna_expression_quantification_rows(
@@ -683,53 +1071,119 @@ def ssgsea_stats_rows(
 # ---------------------------------------------------------------------------
 
 
-def _files_rows(project_raw_dir: Path) -> list[dict[str, Any]]:
-    """One row per (file, case) in the modality manifests under `<project>/`.
+# Which published table carries a given raw modality directory's content.
+#
+# Not every fetched modality is published: the four BCR XML directories are
+# downloaded so the `files` table can describe them and so the bytes are
+# local, but they are a second serialization of data the biotab tables
+# already carry (verified value-for-value — 918/918 fields agree between
+# `bcr ssf xml` and `ssf_tumor_samples`), so they map to None.
+#
+# A `*` suffix means a family of per-form tables rather than one table.
+MODALITY_TABLE: dict[str, str | None] = {
+    "mutations": "masked_somatic_mutation",
+    "expression": "gene_expression_quantification",
+    "mirna": "mirna_expression_quantification",
+    "mirna_isoform": "isoform_expression_quantification",
+    "protein_expression": "protein_expression_quantification",
+    "methylation": "methylation_beta_value",
+    "pathology_reports": "pathology_report",
+    "copy_number_allele_specific": "allele_specific_copy_number_segment",
+    "copy_number_masked": "masked_copy_number_segment",
+    "copy_number_segment_dnacopy": "copy_number_segment",
+    "copy_number_segment_gatk4": "copy_number_segment",
+    "gene_level_copy_number": "gene_level_copy_number",
+    "clinical_supplement": "clinical_supplement_*",
+    "biospecimen_supplement": "biospecimen_supplement_*",
+    "clinical_supplement_xml": None,
+    "clinical_supplement_omf_xml": None,
+    "biospecimen_supplement_xml": None,
+    "biospecimen_supplement_ssf_xml": None,
+}
 
-    Concatenates every modality directory's `manifest.json` and explodes
-    each entry's `cases` list — most files reference exactly one case, but
-    we explode for safety (a future modality might attach multi-case files).
-    """
-    rows: list[dict[str, Any]] = []
-    if not project_raw_dir.exists():
-        return rows
+_GDC_DATA_URL = "https://api.gdc.cancer.gov/data/{file_id}"
+
+
+def _local_file_entries(project_raw_dir: Path) -> dict[str, dict[str, Any]]:
+    """{file_id: manifest entry + modality} for everything downloaded locally."""
+    out: dict[str, dict[str, Any]] = {}
     for modality_dir in sorted(p for p in project_raw_dir.iterdir() if p.is_dir()):
         manifest_path = modality_dir / "manifest.json"
         if not manifest_path.exists():
             continue
-        manifest = json.loads(manifest_path.read_text())
-        modality = modality_dir.name
-        for entry in manifest:
-            common = {
-                "file_id": entry.get("file_id"),
-                "file_name": entry.get("file_name"),
-                "file_size": entry.get("file_size"),
-                "md5sum": entry.get("md5sum"),
-                "data_category": entry.get("data_category"),
-                "data_type": entry.get("data_type"),
-                "data_format": entry.get("data_format"),
-                "experimental_strategy": entry.get("experimental_strategy"),
-                "workflow_type": entry.get("workflow_type"),
-                "access": entry.get("access"),
-                # Absent from manifests written before version provenance
-                # was recorded; those rows report null rather than a guess.
-                "gdc_version": entry.get("gdc_version"),
-                "gdc_first_release": entry.get("gdc_first_release"),
-                "gdc_superseded": entry.get("gdc_superseded"),
-                "modality": modality,
-            }
-            cases = entry.get("cases") or []
-            if not cases:
-                rows.append({"case_id": None, "case_submitter_id": None, **common})
+        for entry in json.loads(manifest_path.read_text()):
+            if entry.get("_status") == "manifest_only":
+                # Discovered but its bytes were never downloaded (a capped
+                # fetch), so nothing here can be in a published table.
                 continue
-            for case in cases:
-                rows.append(
-                    {
-                        "case_id": case.get("case_id"),
-                        "case_submitter_id": case.get("submitter_id"),
-                        **common,
-                    }
-                )
+            out[entry["file_id"]] = {**entry, "_modality": modality_dir.name}
+    return out
+
+
+def _files_rows(project_raw_dir: Path) -> list[dict[str, Any]]:
+    """One row per open-access GDC file for the project.
+
+    The spine is `files_index.json` — every open file the GDC holds, whether
+    or not this pipeline downloaded it — so the table describes the
+    project's entire open footprint. Local manifests then enrich the rows
+    for files we actually have, supplying `modality` and the fields the
+    index doesn't carry.
+
+    Falls back to local manifests alone when no index has been fetched, so
+    a project built before `fetch-file-index` existed still produces a
+    table; those rows simply describe less.
+
+    One row per file. A file that names several cases (the project-level
+    BCR biotabs name all of them) reports a null `case_id` rather than being
+    exploded into one row per case, which would imply a per-patient file
+    that does not exist.
+    """
+    rows: list[dict[str, Any]] = []
+    if not project_raw_dir.exists():
+        return rows
+    local = _local_file_entries(project_raw_dir)
+
+    index_path = project_raw_dir / "files_index.json"
+    if index_path.exists():
+        spine = json.loads(index_path.read_text())
+    else:
+        spine = [{**e, "cases": e.get("cases") or []} for e in local.values()]
+
+    for entry in spine:
+        file_id = entry["file_id"]
+        got = local.get(file_id)
+        modality = got["_modality"] if got else None
+        table = MODALITY_TABLE.get(modality) if modality else None
+        cases = entry.get("cases") or []
+        case = cases[0] if len(cases) == 1 else {}
+        # Prefer the index's values (fetched in one consistent query) and
+        # fall back to the manifest for anything it lacks.
+        src = {**(got or {}), **{k: v for k, v in entry.items() if v is not None}}
+        rows.append(
+            {
+                "case_id": case.get("case_id"),
+                "case_submitter_id": case.get("submitter_id"),
+                "file_id": file_id,
+                "file_name": src.get("file_name"),
+                "file_size": src.get("file_size"),
+                "md5sum": src.get("md5sum"),
+                "data_category": src.get("data_category"),
+                "data_type": src.get("data_type"),
+                "data_format": src.get("data_format"),
+                "experimental_strategy": src.get("experimental_strategy"),
+                "workflow_type": src.get("workflow_type"),
+                "access": src.get("access"),
+                "gdc_version": src.get("gdc_version"),
+                "gdc_first_release": src.get("gdc_first_release"),
+                "gdc_superseded": src.get("gdc_superseded"),
+                "platform": src.get("platform"),
+                "modality": modality,
+                "in_dataset": table is not None,
+                "dataset_table": table,
+                "gdc_download_url": _GDC_DATA_URL.format(file_id=file_id),
+            }
+        )
+    rows.sort(key=lambda r: (r.get("data_type") or "", r.get("file_name") or ""))
     return rows
 
 
@@ -778,7 +1232,8 @@ def build_tables(
     thunks: dict[str, Any] = {
         "cases": lambda: _cases_rows(cases),
         "masked_somatic_mutation": _mutation_rows,
-        "gene_expression_quantification": lambda: _expression_rows(cases, project_raw_dir),
+        # Yields Arrow batches rather than dicts; see the emitter's docstring.
+        "gene_expression_quantification": lambda: _expression_batches(cases, project_raw_dir),
         "files": lambda: _files_rows(project_raw_dir),
         "survival_derived": list,
         "pathology_report": lambda: _pathology_report_rows(cases, project_raw_dir),
@@ -787,6 +1242,19 @@ def build_tables(
         ),
         "masked_copy_number_segment": lambda: (
             _masked_copy_number_segment_rows(cases, project_raw_dir)
+        ),
+        "copy_number_segment": lambda: _copy_number_segment_rows(cases, project_raw_dir),
+        # Yields Arrow batches rather than dicts; see the emitter's docstring.
+        "gene_level_copy_number": lambda: _gene_level_copy_number_batches(
+            cases, project_raw_dir
+        ),
+        "gene_model": lambda: _gene_model_rows(project_raw_dir),
+        # Yields Arrow batches rather than dicts; see the emitter's docstring.
+        "methylation_beta_value": lambda: _methylation_beta_value_batches(
+            cases, project_raw_dir
+        ),
+        "isoform_expression_quantification": lambda: (
+            _isoform_expression_quantification_rows(cases, project_raw_dir)
         ),
         "mirna_expression_quantification": lambda: (
             _mirna_expression_quantification_rows(cases, project_raw_dir)
@@ -875,20 +1343,55 @@ def derived_survival_rows(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # the SQL viewer fast random access. The `cases` table's rows are wide
 # (full nested case JSON); 50 rows per group there matches the
 # consolidated build's sizing.
-_ROW_GROUP_SIZE_DEFAULT = 50
+# A row group is the unit of column-chunk metadata, dictionary pages and
+# page-index entries, so its size should follow how wide a row is. 50 rows
+# is right when one row is a whole nested case record or an embedded PDF;
+# it is pathological for a narrow measurement row, where it means thousands
+# of tiny groups each paying that fixed overhead in full. TCGA-CHOL's
+# `isoform_expression_quantification` was 3,897 groups over 194,815 rows.
+#
+# So the default is sized for the narrow long tables that make up nearly
+# every entry in `TABULAR_TABLES`, and the genuinely wide ones are pinned
+# small below.
+_ROW_GROUP_SIZE_DEFAULT = 100_000
+# Row groups for the per-gene tables must comfortably exceed the gene
+# cardinality, not just "be large". Parquet writes a fresh dictionary page
+# per column per row group, and with 60,660 distinct `gene_id`s a 100k-row
+# group amortises a ~1 MB dictionary over only ~1.6 aliquots — so the
+# dictionary gets rewritten 747 times across TCGA-BRCA's expression table
+# and `gene_id` alone costs 497 MB, 6.6 bytes for every row. Raising the
+# group to 1M rows (~16 aliquots) cut the whole table from 1.88 to 1.13 GiB
+# with no schema change at all.
+_ROW_GROUP_SIZE_GENE_SCALE = 1_000_000
+# zstd over snappy is a further ~25% on these tables and costs only write
+# time; every reader in the ecosystem handles it.
+_COMPRESSION = "zstd"
+_ROW_GROUP_SIZE_WIDE_ROW = 50
 _ROW_GROUP_SIZE_BY_TABLE: dict[str, int] = {
-    "gene_expression_quantification": 100_000,
+    # One row is the patient's full nested GDC case tree.
+    "cases": _ROW_GROUP_SIZE_WIDE_ROW,
+    # One row embeds a scanned PDF — hundreds of KB of bytes.
+    "pathology_report": _ROW_GROUP_SIZE_WIDE_ROW,
+    "gene_expression_quantification": _ROW_GROUP_SIZE_GENE_SCALE,
+    "gene_level_copy_number": _ROW_GROUP_SIZE_GENE_SCALE,
+    # ~486k probes per 450k array file — same dictionary-page problem as the
+    # per-gene tables, same fix.
+    "methylation_beta_value": _ROW_GROUP_SIZE_GENE_SCALE,
+    # The gene model is one small table read whole; a single row group is
+    # both the smallest and the fastest thing to hand a reader.
+    "gene_model": 100_000,
     # ssGSEA scores are the same shape as expression -- narrow rows, very
     # many of them (575k per project for Hallmark, ~17M for a Reactome-sized
     # collection) -- so they get the same row-group treatment.
-    **{f"ssgsea_scores_{c}": 100_000 for c in SSGSEA_COLLECTIONS},
+    **{f"ssgsea_scores_{c}": _ROW_GROUP_SIZE_GENE_SCALE for c in SSGSEA_COLLECTIONS},
 }
 
 
 def write_tables(
-    tables: dict[str, list[dict[str, Any]]],
+    tables: dict[str, Any],
     processed_dir: Path,
     project_id: str,
+    counts: dict[str, int] | None = None,
 ) -> dict[str, Path]:
     """Write each table to `<processed_dir>/<project_id>/<table>/data.parquet`.
 
@@ -896,6 +1399,13 @@ def write_tables(
     not in that map (today: `clinical_supplement_*`) get schema inferred
     from rows — each project ships only the columns its biotab forms
     contain.
+
+    A table's value is either a list of row dicts or an iterator of
+    `pa.RecordBatch`. The per-gene tables use the latter — they are far too
+    large to materialise as dicts — and are streamed straight to Parquet.
+    Because a streamed table's row count isn't knowable until it has been
+    written, `counts` is filled in with the rows written per table so
+    callers can report totals without holding the rows.
 
     Uses the same row-group + page-index settings as the consolidated build
     so HF Data Studio can scan large tables (notably `expression`) without
@@ -909,6 +1419,20 @@ def write_tables(
     project_dir.mkdir(parents=True, exist_ok=True)
     for table_name, rows in tables.items():
         out_path = project_dir / table_name / "data.parquet"
+        row_group_size = _ROW_GROUP_SIZE_BY_TABLE.get(table_name, _ROW_GROUP_SIZE_DEFAULT)
+        if not isinstance(rows, list):
+            # A stream of `pa.RecordBatch` — used by tables too large to
+            # materialise as Python dicts (see
+            # `_gene_level_copy_number_batches`). Written incrementally so
+            # peak memory stays at one batch.
+            n_written = _write_batches(
+                rows, out_path, TABULAR_TABLES[table_name], row_group_size
+            )
+            if n_written is not None:
+                out_paths[table_name] = out_path
+                if counts is not None:
+                    counts[table_name] = n_written
+            continue
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if table_name in TABULAR_TABLES:
             table = pa.Table.from_pylist(rows, schema=TABULAR_TABLES[table_name])
@@ -922,8 +1446,71 @@ def write_tables(
         pq.write_table(
             table,
             out_path,
-            row_group_size=_ROW_GROUP_SIZE_BY_TABLE.get(table_name, _ROW_GROUP_SIZE_DEFAULT),
+            compression=_COMPRESSION,
+            row_group_size=row_group_size,
             write_page_index=True,
         )
         out_paths[table_name] = out_path
+        if counts is not None:
+            counts[table_name] = len(rows)
     return out_paths
+
+
+def _write_batches(
+    batches: Any,
+    out_path: Path,
+    schema: Any,
+    row_group_size: int,
+) -> int | None:
+    """Stream record batches to one Parquet file; None if there were none.
+
+    Batches arrive one per source file (~60k rows), which is far too small
+    to be a row group of its own — see `_ROW_GROUP_SIZE_BY_TABLE` for why
+    small groups are expensive when the gene cardinality is 60,660. They are
+    accumulated until they reach `row_group_size` and flushed together, so
+    the on-disk layout matches what the non-streaming path produces.
+
+    Nothing is created until the first batch arrives, so a project with no
+    files for this modality leaves no empty parquet behind.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    writer: pq.ParquetWriter | None = None
+    pending: list[pa.RecordBatch] = []
+    pending_rows = 0
+    total_rows = 0
+
+    def flush() -> None:
+        nonlocal pending, pending_rows
+        if not pending:
+            return
+        assert writer is not None
+        # Explicit row_group_size rather than pyarrow's default, so the
+        # on-disk grouping doesn't drift if that default ever changes.
+        writer.write_table(
+            pa.Table.from_batches(pending, schema=schema), row_group_size=row_group_size
+        )
+        pending = []
+        pending_rows = 0
+
+    try:
+        for batch in batches:
+            if writer is None:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                writer = pq.ParquetWriter(
+                    out_path,
+                    schema,
+                    compression=_COMPRESSION,
+                    write_page_index=True,
+                )
+            pending.append(batch)
+            pending_rows += batch.num_rows
+            total_rows += batch.num_rows
+            if pending_rows >= row_group_size:
+                flush()
+        flush()
+    finally:
+        if writer is not None:
+            writer.close()
+    return total_rows if writer is not None else None

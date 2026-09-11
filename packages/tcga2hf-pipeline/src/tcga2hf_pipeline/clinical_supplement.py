@@ -85,6 +85,11 @@ FILE_FIELDS: list[str] = [
     "md5sum",
     "access",
     "data_format",
+    # Carried so the `files` table can describe these rows like every other
+    # modality's. Without them a biotab shows up with a null `data_type`,
+    # which reads as missing data rather than as a project-level form.
+    "data_type",
+    "data_category",
 ]
 
 
@@ -169,6 +174,12 @@ def fetch_clinical_supplements(
             "file_size": hit.get("file_size"),
             "md5sum": hit.get("md5sum"),
             "data_format": hit.get("data_format"),
+            "data_type": hit.get("data_type"),
+            "data_category": hit.get("data_category"),
+            "access": hit.get("access"),
+            # Deliberately no `cases`: a biotab is a *project*-level form
+            # covering every case, so exploding it per case would multiply
+            # one file into 51 rows that each imply a per-patient file.
             "form_kind": hit["_form_kind"],
             "gdc_version": version.get("version"),
             "gdc_first_release": version.get("release"),

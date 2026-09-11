@@ -173,7 +173,7 @@ def test_build_tables_only_filter_skips_unrequested_emitters(tmp_path: Path, mon
 
         return inner
 
-    monkeypatch.setattr(tabular, "_expression_rows", _spy("expression", []))
+    monkeypatch.setattr(tabular, "_expression_batches", _spy("expression", []))
     monkeypatch.setattr(tabular, "_mutations_rows", _spy("mutations", []))
 
     cases = [{"case_id": _CASE_UUID, "submitter_id": "TCGA-W5-AA2X", "samples": []}]
