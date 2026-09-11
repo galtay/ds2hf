@@ -43,6 +43,13 @@ def upload_dataset(
         private=private,
         exist_ok=True,
     )
+    # `create_repo` applies `private` only when it actually creates the repo:
+    # with `exist_ok=True` an existing repo makes the whole call a no-op and
+    # the flag is silently ignored. That turned a `--public` push to a repo
+    # first created as a private staging copy into a private one, reported as
+    # success. Assert the visibility we were asked for on every push instead.
+    if api.repo_info(repo_id=repo_id, repo_type="dataset").private != private:
+        api.update_repo_settings(repo_id=repo_id, repo_type="dataset", private=private)
     api.upload_folder(
         folder_path=str(processed_dir),
         repo_id=repo_id,
