@@ -24,11 +24,18 @@ def card_urls() -> list[str]:
 
 
 def test_cards_cite_the_gdc_expression_pipeline() -> None:
-    """The strandedness guidance rests on GDC's own statement, so the link
-    that backs it has to be present and has to be a reference definition."""
+    """The strandedness guidance rests on GDC's own statement, so the quote
+    and the link backing it both have to survive edits to the card.
+
+    Matched against whitespace-collapsed source rather than the literal
+    text: an earlier version asserted on the exact line break and broke the
+    moment the prose was rewrapped, which says nothing about the citation.
+    """
     text = CARD_MODULE.read_text()
+    collapsed = " ".join(text.replace(">", " ").split())
     assert "[gdc-mrna]: https://docs.gdc.cancer.gov" in text
-    assert "treated\n> as unstranded during analyses" in text
+    assert "all RNA-Seq reads are treated as unstranded during analyses" in collapsed
+    assert "mRNA Analysis Pipeline][gdc-mrna], Introduction" in collapsed
 
 
 def test_every_referenced_link_is_defined() -> None:
