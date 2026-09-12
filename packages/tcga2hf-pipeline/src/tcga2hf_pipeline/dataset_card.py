@@ -797,7 +797,8 @@ tags:
   - tcga
   - clinical
   - genomics
-{configs_block} ---
+{configs_block}
+---
 """
 
     body = "\n".join(
@@ -850,7 +851,8 @@ tags:
   - tcga
   - clinical
   - genomics
-{configs_block} ---
+{configs_block}
+---
 """
 
     body = "\n".join(
@@ -1039,13 +1041,14 @@ tags:
   - webdataset
 configs:
   - config_name: cases
-data_files:
+    data_files:
       - split: train
-path: cases.parquet
+        path: cases.parquet
   - config_name: files
-data_files:
+    data_files:
       - split: train
-path: files.parquet ---
+        path: files.parquet
+---
 """
 
     header = f"""\
@@ -1447,7 +1450,8 @@ tags:
   - clinical
   - genomics
   - {slug}
-{configs_block} ---
+{configs_block}
+---
 """
 
     header = f"""\
@@ -1576,7 +1580,8 @@ tags:
   - genomics
   - transcriptomics
   - rna-seq
-{configs_block} ---
+{configs_block}
+---
 """
 
     body = (

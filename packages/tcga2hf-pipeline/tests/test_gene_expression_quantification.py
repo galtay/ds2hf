@@ -433,9 +433,12 @@ def test_expression_values_catches_a_corrupted_cell(tmp_path: Path) -> None:
 def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
     """The end-to-end guard: HF parses this block to decide what to serve.
 
-    Checking the template's shape catches a collapsed key; only parsing the
-    rendered card proves the result is YAML at all, and that every config
-    written to disk is declared in it.
+    The frontmatter is isolated between the opening and closing `---`
+    delimiters, and the closing one is asserted to exist. An earlier version
+    split on "---\n" and took element [1], which silently returns the whole
+    document when the closing delimiter is missing -- so a card whose
+    frontmatter never terminated still parsed, still yielded the keys it
+    checked, and shipped to the Hub as "empty or missing yaml metadata".
     """
     import yaml
     from tcga2hf_pipeline import dataset_card
@@ -445,8 +448,12 @@ def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
     dataset_card.write_expression_card(out, counts, ["TCGA-AA", "TCGA-BB"], gdc_release="46.0")
 
     text = (out / "README.md").read_text()
-    assert text.startswith("---\n")
-    front = yaml.safe_load(text.split("---\n")[1])
+    assert text.startswith("---\n"), "card must open with a frontmatter delimiter"
+    closing = text.find("\n---\n", 3)
+    assert closing != -1, "frontmatter has no closing --- on its own line"
+
+    front = yaml.safe_load(text[4 : closing + 1])
+    assert isinstance(front, dict), f"frontmatter is {type(front).__name__}, not a mapping"
 
     assert front["license"] == "other"
     assert front["pretty_name"].startswith("TCGA Gene Expression Quantification")
@@ -455,3 +462,6 @@ def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
     declared = {c["config_name"] for c in front["configs"]}
     on_disk = {d.name for d in out.iterdir() if (d / "data.parquet").exists()}
     assert declared == on_disk, f"declared {declared} != on disk {on_disk}"
+
+    # The body must start after the frontmatter, not be swallowed by it.
+    assert text[closing:].lstrip("-\n").startswith("# TCGA")
