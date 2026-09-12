@@ -1499,12 +1499,20 @@ def upload_project_tabular_cmd(
     Uploads `<data-dir>/processed_project_tabular/<PROJECT>/`, which is the
     repo root: `README.md` plus one `<table>/data.parquet` per config.
 
-    **Every publish costs a full dataset-viewer re-index.** The Hub
-    invalidates all of the repo's cached splits and re-queues them, and the
+    **A publish that changes data costs a full dataset-viewer re-index.**
+    The Hub invalidates the repo's cached splits and re-queues them, and the
     viewer is dark until that finishes — tens of minutes for a project with
-    ~40 configs. So an upload is a deliberate act, not something to do after
-    each edit: build and verify as often as you like, and push once you are
-    ready to wait for the rebuild.
+    ~40 configs. So a data upload is a deliberate act, not something to do
+    after each edit: build and verify as often as you like, and push once
+    you are ready to wait for the rebuild.
+
+    A card-only publish is cheap. `upload_folder` hashes before sending, so
+    unchanged parquets are not re-transmitted, and a commit touching only
+    `README.md` leaves the cached splits alone — measured on TCGA-CHOL:
+    0 bytes uploaded, `viewer: true` and all 41 splits still listed
+    throughout. That holds for prose and link edits. Changing the `configs:`
+    block is a different matter, since that is what tells the Hub which
+    splits exist.
 
     That is also why verification runs *first* rather than after. Finding a
     problem post-upload means a second push and a second re-index; finding
