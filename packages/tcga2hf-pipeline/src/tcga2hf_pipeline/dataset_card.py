@@ -1631,12 +1631,12 @@ var = load_dataset(REPO, "genes", split="train").to_pandas().set_index("gene_id"
 adata = ad.AnnData(X=X, obs=obs, var=var)          # X from above
 
 adata[adata.obs.project_id == "TCGA-BRCA"]         # one cohort
-adata[:, adata.var.gene_type == "protein_coding"]  # 19,962 genes
+adata[:, adata.var.gene_type == "protein_coding"]  # by biotype
 ```
 
 ## Notes on the data
 
-**Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` reduces the set to the 19,962 protein-coding genes in a single mask.
+**Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` supports restriction by biotype where an analysis calls for it.
 
 **Strandedness.** STAR emits three count columns because the aligner cannot know the library protocol: `unstranded` (htseq `-s no`), `stranded_first` (`-s yes`) and `stranded_second` (`-s reverse`). GDC resolves the choice at the pipeline level rather than per sample:
 

@@ -30,8 +30,8 @@ is the one GDC serves, and the source TSV row is recoverable by pairing
 `genes` with a row's `values`.
 
 Gene *selection* is deliberately absent. All 60,660 GENCODE v36 features
-ship, with `gene_type` on the `genes` config, so restricting to the 19,962
-protein-coding ones stays the consumer's choice rather than ours.
+ship, with `gene_type` on the `genes` config, so restricting by biotype
+stays the consumer's choice rather than ours.
 """
 
 from __future__ import annotations
