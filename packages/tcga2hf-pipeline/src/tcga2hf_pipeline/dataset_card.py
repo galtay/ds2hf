@@ -309,7 +309,7 @@ _GDC_REFERENCES = """\
 ## GDC references
 
 - [Data dictionary][gdc-dict] (every entity + field definition)
-- [Biospecimen Encyclopedia](https://docs.gdc.cancer.gov/Encyclopedia/pages/Biospecimen/)
+- [Biospecimen Encyclopedia](https://docs.gdc.cancer.gov/Encyclopedia/pages/Biospecimen_Data/)
 - [MAF format spec](https://docs.gdc.cancer.gov/Data/File_Formats/MAF_Format/)
 - [Gene Expression Quantification spec](https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/)
 - [Sample Type codes](https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes)
@@ -377,6 +377,7 @@ significantly between versions. Pipeline source: [`galtay/tcga2hf`][repo].
 # Defined once at the bottom of the document so they resolve everywhere.
 _LINK_REFS = """\
 [gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
+[gdc-mrna]: https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/
 [repo]: https://github.com/galtay/tcga2hf
 [patients]: https://huggingface.co/datasets/gabrielaltay/tcga-patients-open
 [tabular]: https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open
@@ -1880,7 +1881,7 @@ Data Commons serves, as one cohort-wide matrix per quantification.
 - **Projects:** {len(projects)}
 
 This is a **reshape, not a derivation**. Every value is the number GDC
-publishes in its STAR-counts TSV; nothing here is recomputed, imputed or
+publishes in its [STAR counts TSV][gdc-mrna]; nothing here is recomputed, imputed or
 rescaled. For anything other than expression — clinical, survival,
 mutations, methylation, copy number — see the per-project
 `tcga-<project>-tabular-open` datasets, which serve this same data in their
@@ -1900,7 +1901,7 @@ which is exactly AnnData's `var` / `obs` / `X` split.
 
 | config | rows | what a row is |
 |---|---:|---|
-| `genes` | {n_genes:,} | one GENCODE v36 gene, in array order |
+| `genes` | {n_genes:,} | one gene from GDC's [GENCODE v36][gdc-mrna] model, in array order |
 | `samples` | {n_samples:,} | one aliquot, in row order |
 
 One config per GDC quantification, each named for the column it carries in
@@ -1947,17 +1948,25 @@ adata[:, adata.var.gene_type == "protein_coding"]  # 19,962 genes
 on `genes` makes restricting to the 19,962 protein-coding ones a one-line
 mask.
 
-**Use `unstranded` unless you have checked `strand_balance`.** STAR emits
-three count columns because the aligner cannot know the library protocol:
-`unstranded` (htseq `-s no`), `stranded_first` (`-s yes`) and
-`stranded_second` (`-s reverse`). You are meant to pick the one matching
-your prep, and picking wrong costs you signal.
+**Use `unstranded`.** STAR emits three count columns because the aligner
+cannot know the library protocol: `unstranded` (htseq `-s no`),
+`stranded_first` (`-s yes`) and `stranded_second` (`-s reverse`).
 
-Most of TCGA is not strand-specific, which is why GDC derives all three
-normalized values from the unstranded counts, as their names say. But a real
-minority is, and it is concentrated rather than scattered. Every sample
-therefore carries a measured **`strand_balance`** on the `samples` config —
-`stranded_first / (stranded_first + stranded_second)` over the whole library:
+GDC settles the choice at the pipeline level rather than per sample:
+
+> To facilitate harmonization across samples, all RNA-Seq reads are treated
+> as unstranded during analyses.
+>
+> — [mRNA Analysis Pipeline][gdc-mrna], Introduction
+
+That is why the three normalized values exist only in `*_unstranded` form:
+there is no stranded TPM or FPKM to choose between.
+
+The underlying libraries are not uniform, though, and that is worth knowing
+before you reach for the raw stranded counts. Every sample carries a
+measured **`strand_balance`** on `samples` —
+`stranded_first / (stranded_first + stranded_second)` over the whole
+library:
 
 | `strand_balance` | means | use |
 |---|---|---|
@@ -1980,9 +1989,10 @@ unstranded_only = s[s.strand_balance.between(0.4, 0.6)]   # the usual cohort
 `unstranded` counts are valid for every sample regardless of protocol —
 counting reads without regard to strand is never wrong, only less able to
 separate overlapping antisense genes — so it, and the TPM/FPKM derived from
-it, are the right default for cohort-wide comparisons. Reach for the
-stranded columns when you are working inside one of the projects above and
-want that extra specificity.
+it, are the right default for cohort-wide comparisons. The raw stranded
+counts are here if you are working inside one of the projects above and want
+to normalize them yourself, but you would be leaving GDC's harmonized values
+behind to do it.
 
 **Split by patient, not by sample.** Some cases contribute more than one
 aliquot, so a random split over rows will put the same patient in train and
