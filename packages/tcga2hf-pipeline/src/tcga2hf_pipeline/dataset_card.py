@@ -34,10 +34,8 @@ from tcga2hf_pipeline.genomic import MODALITY_FILTERS as _MODALITY_FILTERS
 _SHARED_PROVENANCE = """\
 ### Provenance pinned per build
 
-- `GET /status` → `data_release` / `tag` / `commit` saved in each
-project's `gdc_status.json`.
-- `GET /v0/submission/_dictionary/_all` → schema dictionary snapshot
-saved alongside the raw data; its SHA-256 is recorded in `gdc_status.json`.
+- `GET /status` → `data_release` / `tag` / `commit` saved in each project's `gdc_status.json`.
+- `GET /v0/submission/_dictionary/_all` → schema dictionary snapshot saved alongside the raw data; its SHA-256 is recorded in `gdc_status.json`.
 
 See the [repository][repo] for full request payloads, filter clauses, and the build pipeline source.
 """
@@ -96,8 +94,7 @@ def _data_model(*, consolidated: bool) -> str:
 
 Three sources feed each project's data, all open-access:
 
-- **Case-level clinical structure** — fetched from the GDC `/cases`
-endpoint, returning the full nested case JSON (demographic + diagnoses → treatments + follow_ups + exposures + family_histories + samples → portions → analytes → aliquots). The biospecimen subtree on each case:
+- **Case-level clinical structure** — fetched from the GDC `/cases` endpoint, returning the full nested case JSON (demographic + diagnoses → treatments + follow_ups + exposures + family_histories + samples → portions → analytes → aliquots). The biospecimen subtree on each case:
 
   ```
   case          one patient (TCGA-XX-1234)
@@ -108,10 +105,8 @@ endpoint, returning the full nested case JSON (demographic + diagnoses → treat
               └── aliquot    a vial of that analyte handed off for sequencing
   ```
 
-- **Per-modality files** — discovered via `/files` (filtered by the
-clauses in the table below) and downloaded via `/data`. Each combination locks one `data_type` to a specific GDC pipeline so a future GDC addition can't quietly substitute a different pipeline under the same `data_type`. This covers both the molecular modalities and the scanned Pathology Report PDFs, which are carried verbatim — no text extraction is applied, so consumers can run whichever parser they trust against the original document.
-- **BCR Clinical Supplement biotabs** — original Biospecimen Core
-Resource (BCR) clinical forms shipped as per-project TSVs (one per form: patient, follow_up, nte, drug, radiation, etc.). The harmonized `/cases` endpoint drops or under-populates a number of clinical fields the BCR-original biotabs preserve. The schema varies by cancer type (e.g. BLCA's BCG-response columns don't exist in CHOL's hepatic-marker forms), so each project's biotabs ship only the columns they actually carry. Discovered the same way (`/files` then `/data`) — see the filter table below.
+- **Per-modality files** — discovered via `/files` (filtered by the clauses in the table below) and downloaded via `/data`. Each combination locks one `data_type` to a specific GDC pipeline so a future GDC addition can't quietly substitute a different pipeline under the same `data_type`. This covers both the molecular modalities and the scanned Pathology Report PDFs, which are carried verbatim — no text extraction is applied, so consumers can run whichever parser they trust against the original document.
+- **BCR Clinical Supplement biotabs** — original Biospecimen Core Resource (BCR) clinical forms shipped as per-project TSVs (one per form: patient, follow_up, nte, drug, radiation, etc.). The harmonized `/cases` endpoint drops or under-populates a number of clinical fields the BCR-original biotabs preserve. The schema varies by cancer type (e.g. BLCA's BCG-response columns don't exist in CHOL's hepatic-marker forms), so each project's biotabs ship only the columns they actually carry. Discovered the same way (`/files` then `/data`) — see the filter table below.
 
 ### Source data filters (canonical)
 
@@ -167,20 +162,15 @@ _TABULAR_VIEW_MAPPING = """\
 
 
 _PATIENT_VIEW_SPECIFICS = """\
-- Convenience: each row carries `samples_<modality>` array columns so
-you can column-project just the molecular data you need without walking the nested GDC entities.
-- Loading: the [`tcga2hf` package][repo] ships a typed `TcgaHfPatient`
-pydantic model that mirrors this schema and adds convenience joins (tumor/normal pairs, mutations-by-gene, expression-by-gene, longitudinal timeline).
+- Convenience: each row carries `samples_<modality>` array columns so you can column-project just the molecular data you need without walking the nested GDC entities.
+- Loading: the [`tcga2hf` package][repo] ships a typed `TcgaHfPatient` pydantic model that mirrors this schema and adds convenience joins (tumor/normal pairs, mutations-by-gene, expression-by-gene, longitudinal timeline).
 """
 
 
 _TABULAR_VIEW_SPECIFICS = """\
-- Joining: every flat row carries `case_submitter_id` (and
-`aliquot_submitter_id` where applicable) for direct joins back to `cases` without re-resolving UUIDs.
-- Each (project, table) pair is one HuggingFace **config** named
-`<project>_<table>` (e.g. `TCGA_LUAD_cases`).
-- BCR fields in the `clinical_supplement_*` tables are all typed as
-strings, with sentinel values like `[Not Available]` preserved verbatim.
+- Joining: every flat row carries `case_submitter_id` (and `aliquot_submitter_id` where applicable) for direct joins back to `cases` without re-resolving UUIDs.
+- Each (project, table) pair is one HuggingFace **config** named `<project>_<table>` (e.g. `TCGA_LUAD_cases`).
+- BCR fields in the `clinical_supplement_*` tables are all typed as strings, with sentinel values like `[Not Available]` preserved verbatim.
 """
 
 
@@ -329,8 +319,7 @@ If you publish or present results derived from this dataset, include the
 
 Suggested citations:
 
-- Grossman, R. L., et al. (2016). Toward a Shared Vision for Cancer Genomic Data.
-*NEJM*, 375(12), 1109-1112.
+- Grossman, R. L., et al. (2016). Toward a Shared Vision for Cancer Genomic Data. *NEJM*, 375(12), 1109-1112.
 - The Cancer Genome Atlas Research Network. https://www.cancer.gov/tcga
 - NCI Genomic Data Commons. https://gdc.cancer.gov
 
@@ -599,10 +588,8 @@ The PDFs are carried **verbatim, with no text extraction applied**. Any parse is
 
 Practical notes for anyone parsing them:
 
-- These are page scans. Most carry an OCR text layer added upstream of
-GDC, so a pure-Python extractor returns several hundred to a few thousand characters for nearly every report — but that layer transcribes the barcode strip and handwritten margin notes as noise, and its fidelity varies by submitting institution.
-- Patient identifiers are redacted out of the page image by GDC before
-distribution.
+- These are page scans. Most carry an OCR text layer added upstream of GDC, so a pure-Python extractor returns several hundred to a few thousand characters for nearly every report — but that layer transcribes the barcode strip and handwritten margin notes as noise, and its fidelity varies by submitting institution.
+- Patient identifiers are redacted out of the page image by GDC before distribution.
 
 ### Joining to a sample
 
@@ -715,12 +702,9 @@ Reverse Phase Protein Array. {rppa_shape}. 7,906 files covering **7,827 of 11,42
 
 Three things to know before using it:
 
-- It is the only modality that attaches to a **portion**, not an aliquot,
-so it carries `portion_id` and resolves `sample_id` through the portion.
-- The antibody panel grew over the project's life, and `set_id` records
-which version a measurement came from. A `peptide_target` absent for a sample may mean "not on that panel" rather than "measured as zero".
-- `protein_expression` is **null where the source says `NA`** — a failed
-or missing measurement, not a zero. On TCGA-CHOL that is 930 of 14,370 cells (6.5%).
+- It is the only modality that attaches to a **portion**, not an aliquot, so it carries `portion_id` and resolves `sample_id` through the portion.
+- The antibody panel grew over the project's life, and `set_id` records which version a measurement came from. A `peptide_target` absent for a sample may mean "not on that panel" rather than "measured as zero".
+- `protein_expression` is **null where the source says `NA`** — a failed or missing measurement, not a zero. On TCGA-CHOL that is 930 of 14,370 cells (6.5%).
 
 Values are replicate-based normalized log2 signal, centred near 0, and the sign is meaningful. Agreement with matched RNA is modest and positive, as expected for protein-vs-transcript: median Spearman +0.26 across shared targets on TCGA-CHOL.
 """
@@ -900,12 +884,9 @@ Note what is **absent** by design: no ssGSEA scores, no re-derived survival endp
 
 Member names use GDC's vocabulary throughout, never a local shorthand:
 
-- The sample **key** is `case.submitter_id` (`TCGA-3X-AAV9`). WebDataset
-splits a member name at the first `.`, and TCGA barcodes contain none.
-- The member **stem** is the snake_cased GDC `data_type` —
-`gene_expression_quantification`, not "expression"; `masked_somatic_mutation`, not "mutations". These match the table names in the tabular dataset.
-- Where a patient has several files of one `data_type` (copy number commonly
-runs 2-7), they are disambiguated by GDC **`file_id`**, the handle GDC versions against — not by a positional index of our own.
+- The sample **key** is `case.submitter_id` (`TCGA-3X-AAV9`). WebDataset splits a member name at the first `.`, and TCGA barcodes contain none.
+- The member **stem** is the snake_cased GDC `data_type` — `gene_expression_quantification`, not "expression"; `masked_somatic_mutation`, not "mutations". These match the table names in the tabular dataset.
+- Where a patient has several files of one `data_type` (copy number commonly runs 2-7), they are disambiguated by GDC **`file_id`**, the handle GDC versions against — not by a positional index of our own.
 """
 
 
@@ -942,10 +923,8 @@ for sample in wds.WebDataset(url).decode():        # .decode() gunzips members
 
 `files.jsonl` carries two, because they answer different questions:
 
-- **`md5sum`** — GDC's own, over the file GDC serves. For a `.maf.gz` that
-file is already gzipped, so this is a checksum of compressed bytes; for a `.tsv` it is of plain text.
-- **`md5sum_member`** — over the exact bytes stored in the tar member.
-Verifies with no decode step, which is what an integrity check wants.
+- **`md5sum`** — GDC's own, over the file GDC serves. For a `.maf.gz` that file is already gzipped, so this is a checksum of compressed bytes; for a `.tsv` it is of plain text.
+- **`md5sum_member`** — over the exact bytes stored in the tar member. Verifies with no decode step, which is what an integrity check wants.
 
 `gzipped_by_pipeline` tells you which transformation sits between them. The trap to avoid: `.decode()` gunzips *any* `.gz` member, GDC's own included, so a decoded MAF matches neither checksum until it is re-gzipped. Read members undecoded when checksumming:
 
@@ -1038,17 +1017,11 @@ tags:
   - cancer
   - tcga
   - genomics
-  - webdataset
-configs:
-  - config_name: cases
-    data_files:
-      - split: train
-        path: cases.parquet
-  - config_name: files
-    data_files:
-      - split: train
-        path: files.parquet
----
+  - webdataset configs:
+  - config_name: cases data_files:
+      - split: train path: cases.parquet
+  - config_name: files data_files:
+      - split: train path: files.parquet ---
 """
 
     header = f"""\
@@ -1279,10 +1252,8 @@ def _project_joins_section() -> str:
 
 Two exceptions to know before writing a query:
 
-- **RPPA attaches to a `portion`**, so `protein_expression_quantification`
-carries `portion_id` where its siblings carry `aliquot_id`.
-- **`masked_somatic_mutation` carries `tumor_sample_id` /
-`matched_normal_sample_id`** — a variant call is about a pair of samples.
+- **RPPA attaches to a `portion`**, so `protein_expression_quantification` carries `portion_id` where its siblings carry `aliquot_id`.
+- **`masked_somatic_mutation` carries `tumor_sample_id` / `matched_normal_sample_id`** — a variant call is about a pair of samples.
 
 The full biospecimen hierarchy (sample -> portion -> analyte -> aliquot, with slides, centres and annotations at each level) is nested inside `cases.samples`.
 
@@ -1317,12 +1288,9 @@ Indexing is nearly free where carrying is not: the table is under a megabyte and
 
 **Not carried**, all raw or redundant rather than analysis results:
 
-- `Slide Image` — whole-slide `.svs`, an order of magnitude larger than
-everything else here combined, and not tabular.
-- `Masked Intensities` — the raw `.idat` behind the betas;
-`methylation_beta_value` is the analysis-ready form.
-- The per-case BCR **XML** supplements. Each supplement `data_type` ships
-as both a project-level `bcr biotab` TSV and per-case XML; the tables here are parsed from the biotabs, and the XML is the same data under different element names. Measured, not assumed: 918 of 918 mapped values agree between `bcr ssf xml` and `ssf_tumor_samples`, and 99.3% between `bcr xml` and `clinical_patient`.
+- `Slide Image` — whole-slide `.svs`, an order of magnitude larger than everything else here combined, and not tabular.
+- `Masked Intensities` — the raw `.idat` behind the betas; `methylation_beta_value` is the analysis-ready form.
+- The per-case BCR **XML** supplements. Each supplement `data_type` ships as both a project-level `bcr biotab` TSV and per-case XML; the tables here are parsed from the biotabs, and the XML is the same data under different element names. Measured, not assumed: 918 of 918 mapped values agree between `bcr ssf xml` and `ssf_tumor_samples`, and 99.3% between `bcr xml` and `clinical_patient`.
 
 Controlled-access files are not listed — a URL nobody reading an open dataset can use is noise, and `cases.summary.data_categories` already reports that controlled data exists for a case.
 """
@@ -1343,25 +1311,18 @@ def _project_molecular_section() -> str:
 
 **Filter on `workflow_type`.** Several callers ship for the same aliquot and genuinely disagree — each fits purity and ploidy independently, so one aliquot can be modal CN 2 under ASCAT2 and 4 under ASCAT3. Not filtering pools different answers to the same question.
 
-- Allele-specific is absolute integer CN with purity and ploidy corrected;
-the masked and unmasked tables are ratios against a diploid reference. In a hyperdiploid tumour, CN 3 is copy-neutral against its own baseline but still reads near log2 0.
-- `num_probes` is array probes for DNAcopy, sequencing bins for GATK4 —
-comparable only within a workflow.
-- `chromosome` is written as each source writes it: bare (`1`) in the
-DNAcopy tables, `chr`-prefixed elsewhere.
-- `ABSOLUTE LiftOver` appears only at gene level — it ships no segment file
-anywhere in the GDC.
-- A small tail of masked-segment files is over-fragmented (noisy arrays);
-`num_probes` is the filter.
+- Allele-specific is absolute integer CN with purity and ploidy corrected; the masked and unmasked tables are ratios against a diploid reference. In a hyperdiploid tumour, CN 3 is copy-neutral against its own baseline but still reads near log2 0.
+- `num_probes` is array probes for DNAcopy, sequencing bins for GATK4 — comparable only within a workflow.
+- `chromosome` is written as each source writes it: bare (`1`) in the DNAcopy tables, `chr`-prefixed elsewhere.
+- `ABSOLUTE LiftOver` appears only at gene level — it ships no segment file anywhere in the GDC.
+- A small tail of masked-segment files is over-fragmented (noisy arrays); `num_probes` is the filter.
 
 ### Methylation
 
 SeSAMe level-3 beta, the methylated fraction in [0, 1].
 
-- **`platform` matters.** TCGA spans three Illumina generations with
-*different probe sets*; betas compare only within a platform.
-- **Nulls are real** — ~15% of probes in a 450k file. SeSAMe masks probes
-it cannot trust, so null means "masked", not "unmethylated".
+- **`platform` matters.** TCGA spans three Illumina generations with *different probe sets*; betas compare only within a platform.
+- **Nulls are real** — ~15% of probes in a 450k file. SeSAMe masks probes it cannot trust, so null means "masked", not "unmethylated".
 
 ### Expression, miRNA and isoforms
 
