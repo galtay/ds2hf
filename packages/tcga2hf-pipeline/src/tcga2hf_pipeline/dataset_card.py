@@ -1894,50 +1894,49 @@ tags:
         f"""\
 # TCGA Gene Expression Quantification — Open Access
 
-Every open-access TCGA RNA-Seq gene expression measurement the NCI Genomic
-Data Commons serves, as one cohort-wide matrix per quantification.
+Cohort-wide gene expression matrices for the open-access TCGA RNA-Seq data
+distributed by the NCI Genomic Data Commons. GDC serves these measurements
+one file per aliquot; here they are arranged as one row per sample, with
+each quantification carried as its own matrix over identical axes.
 
 - **GDC data release:** {release}
 - **Built:** {timestamp}
 - **Shape:** {n_samples:,} samples x {n_genes:,} genes
 - **Projects:** {len(projects)}
 
-This is a **reshape, not a derivation**. Every value is the number GDC
-publishes in its [STAR counts TSV][gdc-mrna]; nothing here is recomputed, imputed or
-rescaled. For anything other than expression — clinical, survival,
-mutations, methylation, copy number — see the per-project
-`tcga-<project>-tabular-open` datasets, which serve this same data in their
-`gene_expression_quantification` config as one row per (aliquot, gene).
+Other modalities for the same cases — clinical, survival, mutation,
+methylation, copy number — are published per project as
+`tcga-<project>-tabular-open`, where this expression data also appears, in
+its `gene_expression_quantification` config, as one row per (aliquot, gene).
 
-## Layout
+## Structure
 
-One row per **sample**, so a batch of samples is a batch of rows. The gene
-axis is positional rather than a join key:
+Rows are samples, so a batch of samples is a contiguous batch of rows. The
+gene axis is positional rather than a join key:
 
 ```
 genes[i]    <->  values[i]     within every value config
 samples[j]  <->  row j         within every value config
 ```
 
-which is exactly AnnData's `var` / `obs` / `X` split.
+This corresponds to the `var` / `obs` / `X` split used by AnnData.
 
 | config | rows | what a row is |
 |---|---:|---|
 | `genes` | {n_genes:,} | one gene from GDC's [GENCODE v36][gdc-mrna] model, in array order |
 | `samples` | {n_samples:,} | one aliquot, in row order |
 
-One config per GDC quantification, each named for the column it carries in
-the source TSV:
+Each quantification forms a separate config, named for the column it
+occupies in the source TSV, so an analysis retrieves only the measure it
+uses. The value configs repeat `sample_index`, `aliquot_id`,
+`case_submitter_id`, `project_id` and `sample_type` inline, which removes
+the axis join from a training loop.
 
 | config | dtype | size |
 |---|---|---:|
 {quant_rows}
 
-Download only the one you model on. Each value config repeats
-`sample_index`, `aliquot_id`, `case_submitter_id`, `project_id` and
-`sample_type` inline, so a training loop needs no join at all.
-
-## Reading it
+## Usage
 
 ```python
 import numpy as np
@@ -1950,8 +1949,8 @@ X = np.stack(ds.with_format("numpy")["values"])   # ({n_samples:,}, {n_genes:,})
 y = ds["project_id"]
 ```
 
-The two axis configs turn that into an `AnnData`. They come back in the same
-order as the matrix, so `obs` and `var` line up without a join:
+The two axis configs assemble the same matrix as an `AnnData`. Both are
+returned in matrix order, so `obs` and `var` align without a join:
 
 ```python
 import anndata as ad
@@ -1964,84 +1963,81 @@ adata[adata.obs.project_id == "TCGA-BRCA"]         # one cohort
 adata[:, adata.var.gene_type == "protein_coding"]  # 19,962 genes
 ```
 
-## Choices worth knowing
+## Notes on the data
 
-**No gene selection.** All {n_genes:,} GENCODE v36 features ship. `gene_type`
-on `genes` makes restricting to the 19,962 protein-coding ones a one-line
-mask.
+**Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no
+expression threshold or biotype filter is applied. `gene_type` on `genes`
+reduces the set to the 19,962 protein-coding genes in a single mask.
 
-**Use `unstranded`.** STAR emits three count columns because the aligner
-cannot know the library protocol: `unstranded` (htseq `-s no`),
-`stranded_first` (`-s yes`) and `stranded_second` (`-s reverse`).
-
-GDC settles the choice at the pipeline level rather than per sample:
+**Strandedness.** STAR emits three count columns because the aligner cannot
+know the library protocol: `unstranded` (htseq `-s no`), `stranded_first`
+(`-s yes`) and `stranded_second` (`-s reverse`). GDC resolves the choice at
+the pipeline level rather than per sample:
 
 > To facilitate harmonization across samples, all RNA-Seq reads are treated
 > as unstranded during analyses.
 >
 > — [mRNA Analysis Pipeline][gdc-mrna], Introduction
 
-That is why the three normalized values exist only in `*_unstranded` form:
-there is no stranded TPM or FPKM to choose between.
+The three normalized quantifications therefore exist only in `*_unstranded`
+form; no stranded TPM or FPKM is published.
 
-The underlying libraries are not uniform, though, and that is worth knowing
-before you reach for the raw stranded counts. Every sample carries a
-measured **`strand_balance`** on `samples` —
+The underlying libraries are nonetheless heterogeneous. Each sample carries
+a measured `strand_balance` on `samples`, defined as
 `stranded_first / (stranded_first + stranded_second)` over the whole
 library:
 
-| `strand_balance` | means | use |
+| `strand_balance` | interpretation | corresponding counts |
 |---|---|---|
 | ~0.5 | not strand-specific | `unstranded` |
 | near 0 | reverse-stranded (dUTP) | `stranded_second` |
 | near 1 | forward-stranded | `stranded_first` |
 
-Measured over the {n_strand:,} samples shipped here: median **{bal:.4f}**,
-1st-99th percentile [{bal01:.3f}, {bal99:.3f}], with **{n_ss:,}** samples
-({pct_ss:.1f}%) outside 0.4-0.6 and {n_clean} of the {n_projects} projects
-containing none at all. Where they are:
+Across the {n_strand:,} samples the median is **{bal:.4f}** with a 1st-99th
+percentile range of [{bal01:.3f}, {bal99:.3f}]. **{n_ss:,}** samples
+({pct_ss:.1f}%) fall outside 0.4-0.6, and {n_clean} of the {n_projects}
+projects contain none. They are concentrated rather than dispersed:
 
 {outlier_table}
 
 ```python
 s = load_dataset("{repo_id}", "samples", split="train").to_pandas()
-unstranded_only = s[s.strand_balance.between(0.4, 0.6)]   # the usual cohort
+unstranded_only = s[s.strand_balance.between(0.4, 0.6)]
 ```
 
-`unstranded` counts are valid for every sample regardless of protocol —
-counting reads without regard to strand is never wrong, only less able to
-separate overlapping antisense genes — so it, and the TPM/FPKM derived from
-it, are the right default for cohort-wide comparisons. The raw stranded
-counts are here if you are working inside one of the projects above and want
-to normalize them yourself, but you would be leaving GDC's harmonized values
-behind to do it.
+Unstranded counting remains valid for every sample regardless of protocol —
+disregarding strand is never incorrect, only less able to resolve
+overlapping antisense genes — so `unstranded`, and the TPM and FPKM computed
+from it, remain the appropriate default for cohort-wide comparison. The raw
+stranded counts support independent normalization within the projects listed
+above, at the cost of departing from GDC's harmonized values.
 
-**Split by patient, not by sample.** Some cases contribute more than one
-aliquot, so a random split over rows will put the same patient in train and
-test. `case_submitter_id` is on every value config to make a grouped split
-easy.
+**Repeated sampling.** Some cases contribute more than one aliquot, so a
+random split over rows can place the same patient in both the training and
+held-out partitions. `case_submitter_id` appears on every value config to
+support grouped splitting.
 
-**Sample types are all here.** Primary tumours, solid tissue normals,
-metastatic and recurrent samples all ship; filter on `sample_type` rather
-than assuming a tumour-only cohort.
+**Sample types.** Primary tumours, solid tissue normals, metastatic and
+recurrent samples are all present. Analyses that assume a tumour-only cohort
+should filter on `sample_type`.
 
-**Library composition is published, and it is not uniform.** Alongside the
-gene counts, each sample carries STAR's four unassigned-read tallies —
-`n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous`. Those plus the
-gene counts account for every read in the library, so the fraction actually
-assigned to genes is a per-sample QC measure:
+**Library composition.** Each sample carries STAR's four unassigned-read
+tallies — `n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous` —
+which together with the gene counts account for every read in the library.
+The fraction assigned to genes therefore serves as a per-sample quality
+measure:
 
 ```python
 s = load_dataset("{repo_id}", "samples", split="train").to_pandas()
 unassigned = s[["n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"]].sum(axis=1)
 ```
 
-It ranges from roughly 25% to 81% across TCGA and **tracks the project** —
-TCGA-LAML sits near 40%, TCGA-CHOL near 77% — so it is a confounder for any
-model trained across cancer types.
+This fraction ranges from roughly 25% to 81% and covaries with project:
+TCGA-LAML has a median near 40%, TCGA-CHOL near 77%. It is a potential
+confounder in any model trained across cancer types.
 
-The tallies live on the sample rather than in the matrix, so every `values`
-list is exactly {n_genes:,} long and needs no masking.
+The tallies are held on the sample rather than in the matrix, so every
+`values` list is exactly {n_genes:,} elements long and requires no masking.
 
 """
         + _gdc_references("mrna", "sample_types", "barcode", "dictionary")
