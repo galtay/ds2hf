@@ -353,8 +353,6 @@ _LINK_REFS = """\
 [gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
 [gdc-mrna]: https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/
 [gdc-sample-types]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes
-[star]: https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
-[htseq]: https://htseq.readthedocs.io/en/latest/htseqcount.html
 [repo]: https://github.com/galtay/tcga2hf
 [patients]: https://huggingface.co/datasets/gabrielaltay/tcga-patients-open
 [tabular]: https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open
@@ -1641,7 +1639,7 @@ adata = ad.AnnData(X=X, obs=obs, var=var)
 
 **Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` supports restriction by biotype where an analysis calls for it.
 
-**Strandedness.** STAR's `--quantMode GeneCounts` emits three count columns, one per strandedness assumption. They correspond to htseq-count's `--stranded` settings — `unstranded` to `no`, `stranded_first` to `yes`, `stranded_second` to `reverse` ([STAR manual][star], section on `GeneCounts`; [htseq `--stranded`][htseq]). GDC resolves the choice at the pipeline level:
+**Strandedness.** Three count columns are published — `unstranded`, `stranded_first` and `stranded_second`. GDC resolves the choice between them at the pipeline level:
 
 > To facilitate harmonization across samples, all RNA-Seq reads are treated as unstranded during analyses.
 >
