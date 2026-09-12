@@ -428,3 +428,30 @@ def test_expression_values_catches_a_corrupted_cell(tmp_path: Path) -> None:
     check = check_expression_values(out, projects, genes_per_sample=3)
     assert not check.passed
     assert check.details
+
+
+def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
+    """The end-to-end guard: HF parses this block to decide what to serve.
+
+    Checking the template's shape catches a collapsed key; only parsing the
+    rendered card proves the result is YAML at all, and that every config
+    written to disk is declared in it.
+    """
+    import yaml
+    from tcga2hf_pipeline import dataset_card
+
+    out, _ = _built(tmp_path)
+    counts = {"samples": 3, "genes": len(GENES)}
+    dataset_card.write_expression_card(out, counts, ["TCGA-AA", "TCGA-BB"], gdc_release="46.0")
+
+    text = (out / "README.md").read_text()
+    assert text.startswith("---\n")
+    front = yaml.safe_load(text.split("---\n")[1])
+
+    assert front["license"] == "other"
+    assert front["pretty_name"].startswith("TCGA Gene Expression Quantification")
+    assert isinstance(front["tags"], list) and "rna-seq" in front["tags"]
+
+    declared = {c["config_name"] for c in front["configs"]}
+    on_disk = {d.name for d in out.iterdir() if (d / "data.parquet").exists()}
+    assert declared == on_disk, f"declared {declared} != on disk {on_disk}"

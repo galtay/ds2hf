@@ -107,3 +107,25 @@ def test_expression_card_omits_irrelevant_specs() -> None:
     assert "mrna" in keys
     assert "maf" not in keys
     assert "biospecimen" not in keys
+
+
+def test_frontmatter_is_one_key_per_line() -> None:
+    """YAML frontmatter must not be collapsed into a single line.
+
+    HF reads `configs:` out of this block to decide what to serve, so a
+    malformed one takes the dataset viewer down entirely. A prose-unwrapping
+    pass once joined every key onto one line here, and a whitespace-
+    normalising comparison reported the cards unchanged, because collapsing
+    whitespace is exactly what hides this.
+    """
+    text = CARD_MODULE.read_text()
+    blocks = re.findall(r"^license: other.*$", text, re.MULTILINE)
+    assert blocks, "no frontmatter templates found"
+    for block in blocks:
+        assert block == "license: other", f"frontmatter collapsed: {block[:80]}"
+
+
+@pytest.mark.parametrize("key", ["license_name", "license_link", "pretty_name", "tags"])
+def test_frontmatter_keys_start_their_own_line(key: str) -> None:
+    text = CARD_MODULE.read_text()
+    assert re.search(rf"^{key}:", text, re.MULTILINE), f"{key} does not begin a line"

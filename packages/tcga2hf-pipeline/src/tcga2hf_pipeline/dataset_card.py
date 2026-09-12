@@ -788,7 +788,11 @@ def write_card(
     release_md = _release_md(gdc_releases)
 
     frontmatter = f"""---
-license: other license_name: nih-genomic-data-sharing license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies pretty_name: TCGA Patients (Open Access) tags:
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Patients (Open Access)
+tags:
   - cancer
   - tcga
   - clinical
@@ -837,7 +841,11 @@ def write_tabular_card(
     release_md = _release_md(gdc_releases)
 
     frontmatter = f"""---
-license: other license_name: nih-genomic-data-sharing license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies pretty_name: TCGA Tabular (Open Access) tags:
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Tabular (Open Access)
+tags:
   - cancer
   - tcga
   - clinical
@@ -1020,7 +1028,11 @@ def write_webdataset_card(
     n_files = sum(r["n_files"] for r in index_rows)
 
     frontmatter = """---
-license: other license_name: nih-genomic-data-sharing license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies pretty_name: TCGA WebDataset (Open Access) tags:
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA WebDataset (Open Access)
+tags:
   - cancer
   - tcga
   - genomics
@@ -1425,7 +1437,11 @@ def write_project_tabular_card(
     release = gdc_release or "unknown (status file missing)"
 
     frontmatter = f"""---
-license: other license_name: nih-genomic-data-sharing license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies pretty_name: {project_id} Tabular (Open Access) tags:
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: {project_id} Tabular (Open Access)
+tags:
   - cancer
   - tcga
   - clinical
@@ -1550,7 +1566,11 @@ def write_expression_card(
     )
 
     frontmatter = f"""---
-license: other license_name: nih-genomic-data-sharing license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies pretty_name: TCGA Gene Expression Quantification (Open Access) tags:
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Gene Expression Quantification (Open Access)
+tags:
   - cancer
   - tcga
   - genomics
