@@ -305,16 +305,38 @@ luad_muts = load_dataset(
 _MSIGDB_COLLECTION_URL = "https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
 _MSIGDB_LICENCE_URL = "https://www.gsea-msigdb.org/gsea/msigdb_license_terms.jsp"
 
-_GDC_REFERENCES = """\
-## GDC references
+# One entry per GDC document a card can cite. Cards list the subset that
+# describes what they actually carry: a MAF spec on an expression-only
+# dataset is noise, and a reference list padded with irrelevance teaches the
+# reader to skip it.
+_GDC_DOCS: dict[str, str] = {
+    "dictionary": "[Data dictionary][gdc-dict] (every entity + field definition)",
+    "biospecimen": (
+        "[Biospecimen Encyclopedia]"
+        "(https://docs.gdc.cancer.gov/Encyclopedia/pages/Biospecimen_Data/)"
+    ),
+    "maf": "[MAF format spec](https://docs.gdc.cancer.gov/Data/File_Formats/MAF_Format/)",
+    "mrna": "[mRNA analysis pipeline][gdc-mrna] (STAR counts, TPM / FPKM / FPKM-UQ, GENCODE v36)",
+    "sample_types": (
+        "[Sample Type codes]"
+        "(https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes)"
+    ),
+    "barcode": "[TCGA Barcode reference](https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/)",
+}
 
-- [Data dictionary][gdc-dict] (every entity + field definition)
-- [Biospecimen Encyclopedia](https://docs.gdc.cancer.gov/Encyclopedia/pages/Biospecimen_Data/)
-- [MAF format spec](https://docs.gdc.cancer.gov/Data/File_Formats/MAF_Format/)
-- [Gene Expression Quantification spec](https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/)
-- [Sample Type codes](https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes)
-- [TCGA Barcode reference](https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/)
-"""
+
+def _gdc_references(*keys: str) -> str:
+    """The GDC references section, limited to the docs a card's data uses.
+
+    Called with no keys, lists everything — the right default for the cards
+    that carry every modality. Order is the caller's: most relevant first.
+    """
+    chosen = keys or tuple(_GDC_DOCS)
+    unknown = [k for k in chosen if k not in _GDC_DOCS]
+    if unknown:
+        raise KeyError(f"unknown GDC doc key(s): {unknown}; known: {sorted(_GDC_DOCS)}")
+    body = "\n".join(f"- {_GDC_DOCS[k]}" for k in chosen)
+    return f"## GDC references\n\n{body}\n"
 
 
 _LICENSE_AND_REDISTRIBUTION = """\
@@ -948,7 +970,7 @@ tags:
             _biospecimen_section(consolidated=True),
             _ssgsea_section(consolidated=True),
             _PATIENT_LOADING,
-            _GDC_REFERENCES,
+            _gdc_references(),
             _LICENSE_AND_REDISTRIBUTION,
             _LINK_REFS,
         ]
@@ -1002,7 +1024,7 @@ tags:
             _biospecimen_section(consolidated=False),
             _project_ssgsea_section(),
             _TABULAR_LOADING,
-            _GDC_REFERENCES,
+            _gdc_references(),
             _LICENSE_AND_REDISTRIBUTION,
             _LINK_REFS,
         ]
@@ -1267,7 +1289,7 @@ never shares one with another project.
             header,
             _webdataset_provenance(),
             _webdataset_loading(projects, index_rows),
-            _GDC_REFERENCES,
+            _gdc_references(),
             _LICENSE_AND_REDISTRIBUTION,
             _LINK_REFS,
         ]
@@ -1736,7 +1758,7 @@ else combined. Nothing here requires joining against another dataset.
             _shared_survival_endpoints(consolidated=False),
             _project_ssgsea_section(),
             _project_derived_section(),
-            _GDC_REFERENCES,
+            _gdc_references(),
             _LICENSE_AND_REDISTRIBUTION,
             _LINK_REFS,
         ]
@@ -2022,7 +2044,7 @@ The tallies live on the sample rather than in the matrix, so every `values`
 list is exactly {n_genes:,} long and needs no masking.
 
 """
-        + _GDC_REFERENCES
+        + _gdc_references("mrna", "sample_types", "barcode", "dictionary")
         + _LICENSE_AND_REDISTRIBUTION
         + _LINK_REFS
     )

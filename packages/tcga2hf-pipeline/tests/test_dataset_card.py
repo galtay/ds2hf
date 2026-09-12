@@ -64,3 +64,39 @@ def test_card_urls_resolve() -> None:
         if response.status_code >= 400:
             broken.append(f"{response.status_code} {url}")
     assert not broken, "dead links in dataset cards:\n  " + "\n  ".join(broken)
+
+
+def test_gdc_references_defaults_to_every_doc() -> None:
+    from tcga2hf_pipeline.dataset_card import _GDC_DOCS, _gdc_references
+
+    section = _gdc_references()
+    assert section.count("\n- ") == len(_GDC_DOCS)
+
+
+def test_gdc_references_keeps_the_caller_s_order() -> None:
+    from tcga2hf_pipeline.dataset_card import _gdc_references
+
+    section = _gdc_references("barcode", "maf")
+    assert section.index("Barcode") < section.index("MAF")
+    assert "Biospecimen" not in section
+
+
+def test_gdc_references_rejects_an_unknown_key() -> None:
+    """A typo'd key would otherwise drop a reference silently."""
+    from tcga2hf_pipeline.dataset_card import _gdc_references
+
+    with pytest.raises(KeyError, match="unknown GDC doc key"):
+        _gdc_references("mrna", "maff")
+
+
+def test_expression_card_omits_irrelevant_specs() -> None:
+    """The expression dataset carries no MAF and no biospecimen tree."""
+    import re as _re
+
+    text = CARD_MODULE.read_text()
+    call = _re.search(r"\+ _gdc_references\(([^)]*)\)", text)
+    assert call, "expression card no longer calls _gdc_references with keys"
+    keys = call.group(1)
+    assert "mrna" in keys
+    assert "maf" not in keys
+    assert "biospecimen" not in keys
