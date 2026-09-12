@@ -465,3 +465,34 @@ def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
 
     # The body must start after the frontmatter, not be swallowed by it.
     assert text[closing:].lstrip("-\n").startswith("# TCGA")
+
+
+def test_generated_card_has_well_formed_block_boundaries(tmp_path: Path) -> None:
+    """Headings and link definitions each need a blank line before them.
+
+    Markdown is whitespace-significant in ways that are invisible until
+    rendered: a `##` heading glued to the previous line is not a heading,
+    and a `[label]: url` that lands inside a paragraph is absorbed into it
+    as literal text instead of defining a link. Both shipped -- the second
+    put the whole reference block on screen as prose.
+    """
+    from tcga2hf_pipeline import dataset_card
+
+    out, _ = _built(tmp_path)
+    dataset_card.write_expression_card(
+        out, {"samples": 3, "genes": len(GENES)}, ["TCGA-AA"], gdc_release="46.0"
+    )
+    lines = (out / "README.md").read_text().split("\n")
+
+    problems = []
+    for i, line in enumerate(lines):
+        if not i or lines[i - 1].strip() == "":
+            continue
+        is_definition = line.startswith("[") and "]: " in line
+        # Definitions may stack; only the first of a run needs the blank.
+        after_definition = lines[i - 1].startswith("[") and "]: " in lines[i - 1]
+        if line.startswith("## ") or (is_definition and not after_definition):
+            problems.append(f"line {i + 1}: {line[:60]!r} follows {lines[i - 1][:40]!r}")
+    assert not problems, "markdown blocks need a blank line before them:\n  " + "\n  ".join(
+        problems
+    )

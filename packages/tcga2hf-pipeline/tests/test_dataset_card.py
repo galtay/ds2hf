@@ -101,9 +101,10 @@ def test_expression_card_omits_irrelevant_specs() -> None:
     import re as _re
 
     text = CARD_MODULE.read_text()
-    call = _re.search(r"\+ _gdc_references\(([^)]*)\)", text)
+    # Matches the call regardless of how the body sections are combined.
+    call = _re.search(r'_gdc_references\(\s*"mrna"([^)]*)\)', text)
     assert call, "expression card no longer calls _gdc_references with keys"
-    keys = call.group(1)
+    keys = call.group(0)
     assert "mrna" in keys
     assert "maf" not in keys
     assert "biospecimen" not in keys

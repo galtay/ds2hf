@@ -1584,8 +1584,9 @@ tags:
 ---
 """
 
-    body = (
-        f"""\
+    body = "\n".join(
+        [
+            f"""\
 # TCGA Gene Expression Quantification — Open Access
 
 Cohort-wide gene expression matrices for the open-access TCGA RNA-Seq data distributed by the NCI Genomic Data Commons. GDC serves these measurements one file per aliquot; here they are arranged as one row per sample, with each quantification carried as its own matrix over identical axes.
@@ -1652,10 +1653,16 @@ The normalized quantifications therefore exist only in `*_unstranded` form. All 
 
 **Library composition.** Each sample carries STAR's four unassigned-read tallies — `n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous` — which together with the gene counts account for every read in the library. The proportion assigned to genes varies from roughly 25% to 81% across the cohort and covaries with project.
 
-"""
-        + _gdc_references("mrna", "sample_types", "barcode", "dictionary")
-        + _LICENSE_AND_REDISTRIBUTION
-        + _LINK_REFS
+""",
+            # Joined rather than concatenated, as the other cards are. Each
+            # section ends with a single newline, so `+` would run the next
+            # section's heading onto the previous line -- and a link definition
+            # that lands inside a paragraph is absorbed into it as literal text
+            # rather than defining a link.
+            _gdc_references("mrna", "sample_types", "barcode", "dictionary"),
+            _LICENSE_AND_REDISTRIBUTION,
+            _LINK_REFS,
+        ]
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
