@@ -1917,23 +1917,28 @@ Download only the one you model on. Each value config repeats
 ## Reading it
 
 ```python
-import numpy as np, pyarrow.parquet as pq
+import numpy as np
 from datasets import load_dataset
 
-ds = load_dataset("{repo_id}", "tpm_unstranded", split="train")
+REPO = "{repo_id}"
+
+ds = load_dataset(REPO, "tpm_unstranded", split="train")
 X = np.stack(ds.with_format("numpy")["values"])   # ({n_samples:,}, {n_genes:,}) float32
 y = ds["project_id"]
 ```
 
-As an `AnnData` — about a second for the whole cohort:
+The two axis configs turn that into an `AnnData`. They come back in the same
+order as the matrix, so `obs` and `var` line up without a join:
 
 ```python
 import anndata as ad
-obs = pq.read_table("samples/data.parquet").to_pandas().set_index("aliquot_id")
-var = pq.read_table("genes/data.parquet").to_pandas().set_index("gene_id")
-X = np.stack(pq.read_table("tpm_unstranded/data.parquet", columns=["values"])
-               .column("values").to_numpy(zero_copy_only=False))
-adata = ad.AnnData(X=X, obs=obs, var=var)
+
+obs = load_dataset(REPO, "samples", split="train").to_pandas().set_index("aliquot_id")
+var = load_dataset(REPO, "genes", split="train").to_pandas().set_index("gene_id")
+adata = ad.AnnData(X=X, obs=obs, var=var)          # X from above
+
+adata[adata.obs.project_id == "TCGA-BRCA"]         # one cohort
+adata[:, adata.var.gene_type == "protein_coding"]  # 19,962 genes
 ```
 
 ## Choices worth knowing
