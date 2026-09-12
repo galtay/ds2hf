@@ -1850,7 +1850,7 @@ def write_expression_card(
 license: other
 license_name: nih-genomic-data-sharing
 license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
-pretty_name: TCGA Gene Expression (Open Access)
+pretty_name: TCGA Gene Expression Quantification (Open Access)
 tags:
   - cancer
   - tcga
@@ -1863,7 +1863,7 @@ tags:
 
     body = (
         f"""\
-# TCGA Gene Expression — Open Access
+# TCGA Gene Expression Quantification — Open Access
 
 Every open-access TCGA RNA-Seq gene expression measurement the NCI Genomic
 Data Commons serves, as one cohort-wide matrix per quantification.
@@ -1876,8 +1876,9 @@ Data Commons serves, as one cohort-wide matrix per quantification.
 This is a **reshape, not a derivation**. Every value is the number GDC
 publishes in its STAR-counts TSV; nothing here is recomputed, imputed or
 rescaled. For anything other than expression — clinical, survival,
-mutations, methylation, copy number — see the per-project datasets, which
-also serve this same expression data as one row per (aliquot, gene).
+mutations, methylation, copy number — see the per-project
+`tcga-<project>-tabular-open` datasets, which serve this same data in their
+`gene_expression_quantification` config as one row per (aliquot, gene).
 
 ## Layout
 
@@ -1971,7 +1972,7 @@ containing none at all. Where they are:
 {outlier_table}
 
 ```python
-s = load_dataset("REPO_ID", "samples", split="train").to_pandas()
+s = load_dataset("{repo_id}", "samples", split="train").to_pandas()
 unstranded_only = s[s.strand_balance.between(0.4, 0.6)]   # the usual cohort
 ```
 
