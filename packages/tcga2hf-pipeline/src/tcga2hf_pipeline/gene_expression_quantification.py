@@ -437,21 +437,6 @@ def build(
     counts = {name: len(sample_rows) for name in QUANTIFICATIONS}
     stats = strand_summary(all_first, all_second)
 
-    # Where the strand-specific libraries actually are. They cluster rather
-    # than scatter — one project can be more than half of them — so a
-    # per-project count tells a reader far more than a cohort percentage.
-    per_project: dict[str, list[int]] = {}
-    for row, balance in zip(sample_rows, balances, strict=True):
-        entry = per_project.setdefault(row["project_id"], [0, 0])
-        entry[1] += 1
-        if np.isfinite(balance) and not (0.4 <= balance <= 0.6):
-            entry[0] += 1
-    stats["outlier_projects"] = sorted(
-        ((proj, n, total) for proj, (n, total) in per_project.items() if n),
-        key=lambda t: -t[1],
-    )
-    stats["n_projects_clean"] = sum(1 for n, _ in per_project.values() if not n)
-
     (out_dir / "genes").mkdir(parents=True, exist_ok=True)
     pq.write_table(
         genes_table,

@@ -1806,7 +1806,7 @@ def build_gene_expression_quantification_cmd(
         f"{strand['n_strand_specific']} of {strand['n_samples']:,} samples outside 0.4-0.6"
     )
     card = dataset_card.write_expression_card(
-        out_dir, counts, projects_built, strand, gdc_release=gdc_release
+        out_dir, counts, projects_built, gdc_release=gdc_release
     )
     typer.echo(f"\nwrote dataset card -> {card}")
     typer.echo("upload with: tcga2hf-pipeline upload-gene-expression-quantification")

@@ -273,29 +273,6 @@ def test_strand_summary_counts_a_single_outlier() -> None:
     assert stats["n_strand_specific"] == 1
 
 
-def test_build_reports_projects_in_the_strand_breakdown(tmp_path: Path) -> None:
-    """The per-project accounting must cover every project.
-
-    Guards a real bug: the breakdown was silently absent and the card
-    rendered "0 of the 0 projects", contradicting the outlier count printed
-    two lines above it.
-    """
-    _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
-    _write_project(tmp_path, "TCGA-BB", ["al-b0"])
-
-    _, strand = ed.build(
-        tmp_path / "processed_project_tabular",
-        tmp_path / "raw",
-        tmp_path / "processed_gene_expression_quantification",
-    )
-    assert "outlier_projects" in strand
-    assert "n_projects_clean" in strand
-    covered = strand["n_projects_clean"] + len(strand["outlier_projects"])
-    assert covered == 2, "every project must appear in exactly one bucket"
-    # And the two accountings of the same fact must agree.
-    assert sum(n for _, n, _ in strand["outlier_projects"]) == strand["n_strand_specific"]
-
-
 def test_qc_tallies_read_only_the_head(tmp_path: Path) -> None:
     """The N_* rows come off the top of each TSV, keyed by aliquot."""
     _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
