@@ -336,3 +336,118 @@ def test_build_carries_the_qc_tallies(tmp_path: Path) -> None:
     df = pq.read_table(out / "samples" / "data.parquet").to_pandas()
     assert df.n_unmapped.tolist() == [1000, 2000, 1000]
     assert df.n_ambiguous.tolist() == [1003, 2003, 1003]
+
+
+# --- verification -----------------------------------------------------------
+# Each of these breaks the built tree in one specific way. A check that only
+# ever passes tells you nothing.
+
+
+def _built(tmp_path: Path) -> tuple[Path, Path]:
+    """A two-project tree, built. Returns (expression_dir, project_dir)."""
+    _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
+    _write_project(tmp_path, "TCGA-BB", ["al-b0"])
+    out = tmp_path / "processed_gene_expression_quantification"
+    ed.build(tmp_path / "processed_project_tabular", tmp_path / "raw", out)
+    return out, tmp_path / "processed_project_tabular"
+
+
+def test_row_group_lookup_handles_uneven_groups() -> None:
+    """Row groups are per-project batches, so index // size is wrong."""
+    from tcga2hf_pipeline.verify import _row_group_for
+
+    class FakeMeta:
+        num_row_groups = 3
+
+        def row_group(self, i):
+            return type("RG", (), {"num_rows": [64, 15, 64][i]})()
+
+    fake = type("PF", (), {"metadata": FakeMeta()})()
+    assert _row_group_for(fake, 0) == (0, 0)
+    assert _row_group_for(fake, 63) == (0, 63)
+    assert _row_group_for(fake, 64) == (1, 0)  # a fixed stride would say (1, 0) too
+    assert _row_group_for(fake, 79) == (2, 0)  # but here it would wrongly say (1, 15)
+    assert _row_group_for(fake, 100) == (2, 21)
+
+
+def test_axis_alignment_passes_on_a_good_tree(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_axis_alignment
+
+    out, _ = _built(tmp_path)
+    assert check_axis_alignment(out).passed
+
+
+def test_axis_alignment_catches_a_reordered_config(tmp_path: Path) -> None:
+    """The failure the positional contract exists to prevent."""
+    from tcga2hf_pipeline.verify import check_axis_alignment
+
+    out, _ = _built(tmp_path)
+    path = out / "tpm_unstranded" / "data.parquet"
+    table = pq.read_table(path)
+    pq.write_table(table.take([2, 1, 0]), path)
+
+    check = check_axis_alignment(out)
+    assert not check.passed
+    assert any("aliquot order differs" in d for d in check.details)
+
+
+def test_gene_axis_catches_a_divergent_model(tmp_path: Path) -> None:
+
+    from tcga2hf_pipeline.verify import check_gene_axis
+
+    out, projects = _built(tmp_path)
+    assert check_gene_axis(out, projects).passed
+
+    genes = out / "genes" / "data.parquet"
+    table = pq.read_table(genes)
+    swapped = table.set_column(
+        table.schema.get_field_index("gene_id"),
+        "gene_id",
+        pa.array(list(reversed(table.column("gene_id").to_pylist()))),
+    )
+    pq.write_table(swapped, genes)
+    assert not check_gene_axis(out, projects).passed
+
+
+def test_sample_metadata_catches_a_null_label(tmp_path: Path) -> None:
+
+    from tcga2hf_pipeline.verify import check_sample_metadata
+
+    out, _ = _built(tmp_path)
+    assert check_sample_metadata(out).passed
+
+    path = out / "samples" / "data.parquet"
+    table = pq.read_table(path)
+    nulled = table.set_column(
+        table.schema.get_field_index("sample_type"),
+        "sample_type",
+        pa.array([None] * table.num_rows, type=pa.string()),
+    )
+    pq.write_table(nulled, path)
+
+    check = check_sample_metadata(out)
+    assert not check.passed
+    assert any("sample_type" in d for d in check.details)
+
+
+def test_expression_values_catches_a_corrupted_cell(tmp_path: Path) -> None:
+
+    from tcga2hf_pipeline.verify import check_expression_values
+
+    out, projects = _built(tmp_path)
+    assert check_expression_values(out, projects, genes_per_sample=3).passed
+
+    path = out / "tpm_unstranded" / "data.parquet"
+    table = pq.read_table(path)
+    matrix = np.stack(table.column("values").to_numpy(zero_copy_only=False))
+    matrix[0, 0] += 999.0
+    patched = table.set_column(
+        table.schema.get_field_index("values"),
+        "values",
+        ed._values_column(matrix.astype(np.float32), pa.float32()),
+    )
+    pq.write_table(patched, path)
+
+    check = check_expression_values(out, projects, genes_per_sample=3)
+    assert not check.passed
+    assert check.details

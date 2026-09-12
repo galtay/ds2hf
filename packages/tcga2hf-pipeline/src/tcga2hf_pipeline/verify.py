@@ -343,3 +343,254 @@ def verify_project(
         checks.insert(1, check_manifest_vs_gdc(client, project, processed))
         checks.insert(2, check_case_coverage(client, project, processed))
     return checks
+
+
+# ===========================================================================
+# Expression dataset
+#
+# A different question from the per-project checks above. That tree is built
+# from raw GDC bytes, so it is checked against the GDC. This one is built
+# from those per-project tables, so the GDC is the wrong reference: what
+# matters is whether the reshape preserved them, and whether the positional
+# contract the dataset is founded on actually holds.
+# ===========================================================================
+
+
+def _row_group_for(parquet_file: Any, row_index: int) -> tuple[int, int]:
+    """Locate a global row index as (row_group, offset within that group).
+
+    Row groups are per-project write batches capped at ROW_GROUP_SIZE rather
+    than a fixed stride, so `row_index // ROW_GROUP_SIZE` lands on the wrong
+    row as soon as any project's sample count is not a multiple of it. Walk
+    the metadata instead.
+    """
+    start = 0
+    for group in range(parquet_file.metadata.num_row_groups):
+        rows = parquet_file.metadata.row_group(group).num_rows
+        if start + rows > row_index:
+            return group, row_index - start
+        start += rows
+    raise IndexError(f"row {row_index} beyond {start} rows")
+
+
+def check_axis_alignment(processed: Path) -> Check:
+    """Every config must agree on the sample axis, in the same order.
+
+    The dataset joins by position, not by key, so a config whose rows are
+    ordered differently would silently attribute one patient's expression to
+    another. Nothing downstream would notice.
+    """
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
+
+    samples = pq.read_table(processed / "samples" / "data.parquet")
+    expected = samples.column("aliquot_id").to_pylist()
+    n_genes = pq.ParquetFile(processed / "genes" / "data.parquet").metadata.num_rows
+    details, bad = [], False
+
+    if samples.column("sample_index").to_pylist() != list(range(len(expected))):
+        details.append("  samples.sample_index is not 0..n-1")
+        bad = True
+
+    for name in QUANTIFICATIONS:
+        path = processed / name / "data.parquet"
+        if not path.exists():
+            details.append(f"  {name}: missing")
+            bad = True
+            continue
+        table = pq.read_table(path, columns=["sample_index", "aliquot_id"])
+        if table.column("aliquot_id").to_pylist() != expected:
+            details.append(f"  {name}: aliquot order differs from `samples`")
+            bad = True
+        if table.column("sample_index").to_pylist() != list(range(len(expected))):
+            details.append(f"  {name}: sample_index is not 0..n-1")
+            bad = True
+        # One row's list length stands for the config: a short list would
+        # shift every gene after it.
+        parquet_file = pq.ParquetFile(path)
+        first = parquet_file.read_row_group(0, columns=["values"]).column("values")
+        width = len(first[0].as_py())
+        if width != n_genes:
+            details.append(f"  {name}: values length {width:,} != {n_genes:,} genes")
+            bad = True
+
+    return Check(
+        "axis_alignment",
+        not bad,
+        f"{len(QUANTIFICATIONS)} value configs over {len(expected):,} samples x {n_genes:,} genes",
+        details,
+    )
+
+
+def check_gene_axis(processed: Path, project_tabular_dir: Path) -> Check:
+    """The gene axis must still equal the model the values were read against."""
+    import pyarrow.parquet as pq
+
+    ours = pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
+    ours_ids = ours.column("gene_id").to_pylist()
+
+    models = sorted(project_tabular_dir.glob("TCGA-*/gene_model/data.parquet"))
+    if not models:
+        return Check("gene_axis", False, f"no gene_model found under {project_tabular_dir}")
+    theirs = pq.read_table(models[0], columns=["gene_id"]).column("gene_id").to_pylist()
+
+    if ours_ids != theirs:
+        first = next(
+            (i for i, (a, b) in enumerate(zip(ours_ids, theirs, strict=False)) if a != b),
+            min(len(ours_ids), len(theirs)),
+        )
+        return Check(
+            "gene_axis",
+            False,
+            f"differs from {models[0].parent.parent.name} at index {first}",
+            [f"  ours[{first}]={ours_ids[first : first + 1]}, theirs={theirs[first : first + 1]}"],
+        )
+    return Check("gene_axis", True, f"{len(ours_ids):,} genes match {models[0].parent.parent.name}")
+
+
+def check_sample_metadata(processed: Path) -> Check:
+    """Columns a consumer filters on must be populated and in range."""
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(processed / "samples" / "data.parquet")
+    details, bad = [], False
+
+    for column in ("aliquot_id", "case_submitter_id", "project_id", "sample_type"):
+        nulls = table.column(column).null_count
+        if nulls:
+            details.append(f"  {column}: {nulls:,} null")
+            bad = True
+
+    balance = [b for b in table.column("strand_balance").to_pylist() if b is not None]
+    if not balance:
+        details.append("  strand_balance: entirely null")
+        bad = True
+    elif min(balance) < 0.0 or max(balance) > 1.0:
+        details.append(f"  strand_balance outside [0,1]: [{min(balance)}, {max(balance)}]")
+        bad = True
+
+    for column in ("n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"):
+        values = [v for v in table.column(column).to_pylist() if v is not None]
+        if values and min(values) < 0:
+            details.append(f"  {column}: negative value {min(values)}")
+            bad = True
+
+    return Check(
+        "sample_metadata",
+        not bad,
+        f"{table.num_rows:,} samples, {table.num_columns} columns checked",
+        details,
+    )
+
+
+def check_expression_values(
+    processed: Path,
+    project_tabular_dir: Path,
+    projects: int = 4,
+    samples_per_project: int = 2,
+    genes_per_sample: int = 6,
+    seed: int = 0,
+) -> Check:
+    """Re-read cells from the per-project tables this was reshaped from.
+
+    Sampled rather than exhaustive: a full comparison would re-read every
+    per-project expression table. The failure this guards against is a
+    systematic reshape error, which a handful of random cells will expose.
+    """
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
+
+    rng = random.Random(seed)
+    samples = pq.read_table(processed / "samples" / "data.parquet").to_pandas()
+    gene_ids = (
+        pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
+        .column("gene_id")
+        .to_pylist()
+    )
+
+    available = sorted(samples["project_id"].unique())
+    chosen = rng.sample(available, min(projects, len(available)))
+    mismatches, checked = [], 0
+
+    for project in chosen:
+        source = project_tabular_dir / project / "gene_expression_quantification" / "data.parquet"
+        if not source.exists():
+            mismatches.append(f"  {project}: source table missing")
+            continue
+        rows = samples[samples["project_id"] == project]
+        picks = rows.sample(min(samples_per_project, len(rows)), random_state=seed)
+        frame = pq.read_table(
+            source, columns=["aliquot_id", "gene_id", *QUANTIFICATIONS]
+        ).to_pandas()
+
+        for _, row in picks.iterrows():
+            index = int(row["sample_index"])
+            source_rows = frame[frame["aliquot_id"] == row["aliquot_id"]].set_index("gene_id")
+            for gene_index in rng.sample(range(len(gene_ids)), genes_per_sample):
+                gene_id = gene_ids[gene_index]
+                for name in QUANTIFICATIONS:
+                    parquet_file = pq.ParquetFile(processed / name / "data.parquet")
+                    group, offset = _row_group_for(parquet_file, index)
+                    values = (
+                        parquet_file.read_row_group(group, columns=["values"])
+                        .column("values")[offset]
+                        .as_py()
+                    )
+                    got, want = values[gene_index], source_rows.loc[gene_id, name]
+                    checked += 1
+                    if abs(float(got) - float(want)) > abs(float(want)) * 1e-6:
+                        mismatches.append(
+                            f"  {project} {name} sample={index} gene={gene_index}: {got} != {want}"
+                        )
+
+    return Check(
+        "expression_values",
+        not mismatches,
+        f"{checked:,} cells re-read across {len(chosen)} project(s): "
+        f"{len(mismatches)} mismatch(es)",
+        mismatches[:10],
+    )
+
+
+def check_sample_coverage(client: GDCClient, processed: Path) -> Check:
+    """Our sample count must equal the expression files the GDC serves."""
+    import pyarrow.parquet as pq
+
+    ours = pq.ParquetFile(processed / "samples" / "data.parquet").metadata.num_rows
+    # `size: 0` returns the count without the hits — one request rather than
+    # paging through 11,505 file records to measure their length.
+    payload = {
+        "filters": and_(
+            eq("cases.project.program.name", "TCGA"),
+            eq("data_type", "Gene Expression Quantification"),
+            eq("access", "open"),
+        ),
+        "fields": "file_id",
+        "format": "JSON",
+        "size": 0,
+    }
+    theirs = client._post("/files", payload)["data"]["pagination"]["total"]
+    return Check(
+        "sample_coverage",
+        ours == theirs,
+        f"{ours:,} samples ours / {theirs:,} open expression files at GDC",
+    )
+
+
+def verify_expression(
+    processed_dir: Path,
+    project_tabular_dir: Path,
+    sample: int = 4,
+) -> list[Check]:
+    """Run every expression-dataset check. Local ones first, then the API."""
+    checks = [
+        check_axis_alignment(processed_dir),
+        check_gene_axis(processed_dir, project_tabular_dir),
+        check_sample_metadata(processed_dir),
+        check_expression_values(processed_dir, project_tabular_dir, projects=sample),
+    ]
+    with GDCClient() as client:
+        checks.append(check_sample_coverage(client, processed_dir))
+    return checks

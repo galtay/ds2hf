@@ -1812,6 +1812,48 @@ def build_gene_expression_quantification_cmd(
     typer.echo("upload with: tcga2hf-pipeline upload-gene-expression-quantification")
 
 
+@app.command("verify-gene-expression-quantification")
+def verify_gene_expression_quantification_cmd(
+    data_dir: DataDirOpt = None,
+    sample: Annotated[
+        int,
+        typer.Option("--sample", help="Projects to re-read cells from for the value check."),
+    ] = 4,
+) -> None:
+    """Check the built expression dataset against the tables it came from.
+
+    The per-project checks in `verify-project` ask whether a tree agrees
+    with the GDC. These ask a narrower question, because this dataset is a
+    reshape of trees that were already verified that way: did the reshape
+    preserve them, and does the positional contract hold?
+
+    That contract is the reason this exists. Values are addressed by
+    position in two directions at once -- `genes[i]` to `values[i]`, and
+    `samples[j]` to row `j` -- so a config whose rows came out in a
+    different order would attribute one patient's expression to another and
+    nothing downstream would notice.
+
+    Exits non-zero if any check fails, so it can gate an upload.
+    """
+    root = _resolve_data_dir(data_dir)
+    checks = verify.verify_expression(
+        root / "processed_gene_expression_quantification",
+        root / "processed_project_tabular",
+        sample=sample,
+    )
+    typer.echo("verifying the expression dataset\n")
+    for check in checks:
+        typer.echo(f"[{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
+        for line in check.details:
+            typer.echo(line)
+    failed = [c.name for c in checks if not c.passed]
+    typer.echo("")
+    if failed:
+        typer.echo(f"{len(failed)} check(s) failed: {', '.join(failed)}")
+        raise typer.Exit(code=1)
+    typer.echo(f"all {len(checks)} checks passed")
+
+
 @app.command("upload-gene-expression-quantification")
 def upload_gene_expression_quantification_cmd(
     repo_id: Annotated[
@@ -1826,6 +1868,10 @@ def upload_gene_expression_quantification_cmd(
         str | None,
         typer.Option("--commit-message", "-m", help="Commit message for this upload."),
     ] = None,
+    skip_verify: Annotated[
+        bool,
+        typer.Option("--skip-verify", help="Upload without verifying first. Rarely what you want."),
+    ] = False,
     data_dir: DataDirOpt = None,
 ) -> None:
     """Push `<data-dir>/processed_gene_expression_quantification/` to HF Hub.
@@ -1861,6 +1907,25 @@ def upload_gene_expression_quantification_cmd(
     typer.echo(f"processed dir: {processed_dir}")
     typer.echo(f"repo_id:       {repo_id} ({visibility})")
     typer.echo(f"{len(parquets)} config(s), {total / 1e9:.2f} GB")
+
+    if skip_verify:
+        typer.echo("skipping verification (--skip-verify)")
+    else:
+        typer.echo("\nverifying before publishing ...")
+        checks = verify.verify_expression(processed_dir, root / "processed_project_tabular")
+        for check in checks:
+            typer.echo(f"  [{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
+            if not check.passed:
+                for line in check.details:
+                    typer.echo(f"  {line}")
+        failed = [c.name for c in checks if not c.passed]
+        if failed:
+            typer.echo("")
+            raise typer.BadParameter(
+                f"not uploading: {', '.join(failed)} failed. Fix and rebuild, or pass "
+                "--skip-verify if the GDC API is unreachable."
+            )
+        typer.echo("")
 
     url = hf_upload.upload_dataset(
         processed_dir=processed_dir,
