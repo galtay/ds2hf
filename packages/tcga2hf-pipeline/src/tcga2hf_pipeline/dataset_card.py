@@ -1595,14 +1595,7 @@ Other modalities for the same cases — clinical, survival, mutation, methylatio
 
 ## Structure
 
-Rows are samples, so a batch of samples is a contiguous batch of rows. The gene axis is positional rather than a join key:
-
-```
-genes[i]    <->  values[i]     within every value config
-samples[j]  <->  row j         within every value config
-```
-
-This corresponds to the `var` / `obs` / `X` split used by AnnData.
+A value config holds one row per sample, and each row's `values` list runs in the order given by `genes`. Both axes have their own config:
 
 | config | rows | what a row is |
 |---|---:|---|
