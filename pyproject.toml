@@ -3,7 +3,9 @@ members = ["packages/*"]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.0",
     "pytest>=9.0.3",
+    # Keep in lockstep with the rev pinned in .pre-commit-config.yaml.
     "ruff>=0.15.12",
 ]
 
@@ -34,3 +36,16 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+# E501 measures source lines, which is the wrong question for two places
+# where the "code" is really prose. Neither is a style concession: wrapping
+# the lines would corrupt the output.
+[tool.ruff.lint.per-file-ignores]
+# The dataset cards are markdown held in f-strings. A markdown table row
+# cannot be split across source lines without ceasing to be a table row,
+# and the rendered card is what readers see, not this file.
+"packages/tcga2hf-pipeline/src/tcga2hf_pipeline/dataset_card.py" = ["E501"]
+# The Liu 2018 research scripts are narrative: long prose strings and wide
+# printed tables, written to be read as a report rather than maintained as
+# a library. They still get F/B/I/UP, which catch real defects.
+"dev_research/**/*.py" = ["E501"]

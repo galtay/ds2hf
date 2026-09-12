@@ -1,0 +1,53 @@
+# Run on every commit:  pre-commit install
+# Run over everything:   uv run pre-commit run --all-files
+#
+# The ruff hooks are pinned to the same version as the `dev` dependency
+# group in pyproject.toml. Bump both together, or the hook and a local
+# `uv run ruff` will disagree about what "formatted" means — which is how
+# this repo ended up with 35 unformatted files in the first place.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Markdown uses two trailing spaces as a hard line break.
+        args: [--markdown-linebreak-ext=md]
+        # That exemption keys off the file extension, so it protects .md
+        # files but not the markdown held in dataset_card.py's f-strings —
+        # where stripping a hard break would silently change a published
+        # card. No card uses one today; this keeps it that way by accident
+        # rather than by luck.
+        exclude: ^packages/tcga2hf-pipeline/src/tcga2hf_pipeline/dataset_card\.py$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      # Every dataset in this project lives outside the repo under
+      # $TCGA2HF_DATA_DIR. A large file staged here means a parquet or a
+      # raw GDC download has escaped .gitignore.
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      # .env holds a write-scoped HF token and a PyPI token. It is
+      # gitignored, but a gitignore is one `git add -f` away from failing.
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # The offline suite runs in ~3 s, which is cheap enough to gate a
+      # commit. Network and integration tests are deselected: they need the
+      # live GDC and a built tree under $TCGA2HF_DATA_DIR respectively, and
+      # neither belongs in a hook that must work on a plane.
+      - id: pytest
+        name: pytest (offline)
+        entry: uv run pytest -q -m "not network and not integration"
+        language: system
+        pass_filenames: false
+        types: [python]
