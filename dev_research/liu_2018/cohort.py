@@ -9,8 +9,8 @@ run that first.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pandas as pd
 
@@ -65,8 +65,6 @@ def to_md(df: pd.DataFrame, index: bool = False) -> str:
     sep = "| " + " | ".join("---" for _ in cols) + " |"
     lines = [header, sep]
     for idx, row in df.iterrows():
-        vals = ([str(idx)] if index else []) + [
-            "" if pd.isna(v) else str(v) for v in row.tolist()
-        ]
+        vals = ([str(idx)] if index else []) + ["" if pd.isna(v) else str(v) for v in row.tolist()]
         lines.append("| " + " | ".join(vals) + " |")
     return "\n".join(lines)

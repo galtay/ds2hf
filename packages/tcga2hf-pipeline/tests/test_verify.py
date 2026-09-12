@@ -258,9 +258,7 @@ def test_files_rows_still_work_without_an_index(tmp_path: Path) -> None:
     (raw / "mutations").mkdir(parents=True)
     (raw / "mutations" / "m.maf").write_text("x")
     (raw / "mutations" / "manifest.json").write_text(
-        json.dumps(
-            [{"file_id": "m1", "file_name": "m.maf", "_status": "downloaded", "cases": []}]
-        )
+        json.dumps([{"file_id": "m1", "file_name": "m.maf", "_status": "downloaded", "cases": []}])
     )
     rows = tabular._files_rows(raw)
     assert len(rows) == 1

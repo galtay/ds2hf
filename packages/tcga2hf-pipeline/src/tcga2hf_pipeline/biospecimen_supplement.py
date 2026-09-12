@@ -269,9 +269,7 @@ def load_supplements_for_project(supp_dir: Path) -> dict[str, dict[str, list[dic
             case_submitter_id = _case_submitter_id(rec)
             if case_submitter_id is None:
                 continue
-            slot = by_case.setdefault(
-                case_submitter_id, {k: [] for k in TABULAR_FORM_KINDS}
-            )
+            slot = by_case.setdefault(case_submitter_id, {k: [] for k in TABULAR_FORM_KINDS})
             slot[suffix].append(rec)
     return by_case
 

@@ -27,8 +27,16 @@ def test_attach_survival_populates_struct(chol_row: dict) -> None:
     survival.attach_survival(rows)
     assert "survival_derived" in rows[0]
     sd = rows[0]["survival_derived"]
-    expected = {"os_event", "os_time", "dss_event", "dss_time",
-                "pfi_event", "pfi_time", "dfi_event", "dfi_time"}
+    expected = {
+        "os_event",
+        "os_time",
+        "dss_event",
+        "dss_time",
+        "pfi_event",
+        "pfi_time",
+        "dfi_event",
+        "dfi_time",
+    }
     assert expected <= sd.keys()
 
 
@@ -57,10 +65,12 @@ def test_short_project_strips_tcga_prefix() -> None:
 
 def test_is_stage_iv_matches_only_iv_stages() -> None:
     """Stage IV variants match; III/IIIA do not (no Roman-numeral collision)."""
+
     def case_with_stage(stage: str | None) -> dict:
         return {
             "diagnoses": [{"diagnosis_is_primary_disease": True, "ajcc_pathologic_stage": stage}]
         }
+
     assert survival._is_stage_iv(case_with_stage("Stage IV"))
     assert survival._is_stage_iv(case_with_stage("Stage IVA"))
     assert survival._is_stage_iv(case_with_stage("Stage IVB"))
@@ -85,12 +95,14 @@ def test_dfi_excluded_for_no_field_tumor_types() -> None:
 def test_dfi_excluded_for_stage_iv() -> None:
     case = {
         "demographic": {"vital_status": "Alive", "days_to_death": None},
-        "diagnoses": [{
-            "diagnosis_is_primary_disease": True,
-            "ajcc_pathologic_stage": "Stage IV",
-            "days_to_last_follow_up": 365,
-            "residual_disease": "R0",
-        }],
+        "diagnoses": [
+            {
+                "diagnosis_is_primary_disease": True,
+                "ajcc_pathologic_stage": "Stage IV",
+                "days_to_last_follow_up": 365,
+                "residual_disease": "R0",
+            }
+        ],
         "follow_ups": [],
     }
     assert survival.derive_dfi(case, "TCGA-CHOL") == (None, None)

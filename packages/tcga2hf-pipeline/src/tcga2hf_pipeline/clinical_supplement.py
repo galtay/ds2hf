@@ -168,26 +168,28 @@ def fetch_clinical_supplements(
     for hit in eligible:
         status = "cached" if hit["file_id"] in cached_ids else "downloaded"
         version = versions.get(hit["file_id"], {})
-        manifest.append({
-            "file_id": hit["file_id"],
-            "file_name": hit["file_name"],
-            "file_size": hit.get("file_size"),
-            "md5sum": hit.get("md5sum"),
-            "data_format": hit.get("data_format"),
-            "data_type": hit.get("data_type"),
-            "data_category": hit.get("data_category"),
-            "access": hit.get("access"),
-            # Deliberately no `cases`: a biotab is a *project*-level form
-            # covering every case, so exploding it per case would multiply
-            # one file into 51 rows that each imply a per-patient file.
-            "form_kind": hit["_form_kind"],
-            "gdc_version": version.get("version"),
-            "gdc_first_release": version.get("release"),
-            "gdc_superseded": bool(
-                version and version.get("latest_id") not in (None, hit["file_id"])
-            ),
-            "_status": status,
-        })
+        manifest.append(
+            {
+                "file_id": hit["file_id"],
+                "file_name": hit["file_name"],
+                "file_size": hit.get("file_size"),
+                "md5sum": hit.get("md5sum"),
+                "data_format": hit.get("data_format"),
+                "data_type": hit.get("data_type"),
+                "data_category": hit.get("data_category"),
+                "access": hit.get("access"),
+                # Deliberately no `cases`: a biotab is a *project*-level form
+                # covering every case, so exploding it per case would multiply
+                # one file into 51 rows that each imply a per-patient file.
+                "form_kind": hit["_form_kind"],
+                "gdc_version": version.get("version"),
+                "gdc_first_release": version.get("release"),
+                "gdc_superseded": bool(
+                    version and version.get("latest_id") not in (None, hit["file_id"])
+                ),
+                "_status": status,
+            }
+        )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
 
@@ -261,15 +263,18 @@ def load_supplements_for_project(supp_dir: Path) -> dict[str, dict[str, Any]]:
     by_case: dict[str, dict[str, Any]] = {}
 
     def _slot(case_id: str) -> dict[str, Any]:
-        return by_case.setdefault(case_id, {
-            "patient": None,
-            "follow_ups": [],
-            "ntes": [],
-            "drugs": [],
-            "radiations": [],
-            "ablations": [],
-            "omfs": [],
-        })
+        return by_case.setdefault(
+            case_id,
+            {
+                "patient": None,
+                "follow_ups": [],
+                "ntes": [],
+                "drugs": [],
+                "radiations": [],
+                "ablations": [],
+                "omfs": [],
+            },
+        )
 
     for path in sorted(supp_dir.glob("*.txt")):
         kind = _form_kind(path.name)

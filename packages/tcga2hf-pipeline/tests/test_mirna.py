@@ -129,12 +129,18 @@ def test_ambiguous_aliquot_entities_are_skipped(tmp_path: Path) -> None:
         {"entity_id": _ALIQUOT_UUID, "entity_type": "aliquot", "entity_submitter_id": "a"},
         {"entity_id": "other-aliquot", "entity_type": "aliquot", "entity_submitter_id": "b"},
     ]
-    assert tabular._mirna_expression_quantification_rows(
-        [_case()], _build_project(tmp_path, entities=two)
-    ) == []
-    assert tabular._mirna_expression_quantification_rows(
-        [_case()], _build_project(tmp_path / "none", entities=[])
-    ) == []
+    assert (
+        tabular._mirna_expression_quantification_rows(
+            [_case()], _build_project(tmp_path, entities=two)
+        )
+        == []
+    )
+    assert (
+        tabular._mirna_expression_quantification_rows(
+            [_case()], _build_project(tmp_path / "none", entities=[])
+        )
+        == []
+    )
 
 
 def test_manifest_only_entries_are_skipped(tmp_path: Path) -> None:

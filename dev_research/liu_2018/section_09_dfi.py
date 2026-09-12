@@ -17,7 +17,6 @@ from collections import Counter
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import load_df, to_md
 from section_05_match_rate import classify
 
@@ -125,18 +124,40 @@ def main() -> None:
     n_der_pop_cdr_na = cnt["der_pop_cdr_na"]
     total = sum(cnt.values())
 
-    bucket_df = pd.DataFrame([
-        {"bucket": "match", "patients": n_match, "%": round(100 * n_match / total, 1),
-         "meaning": "Both populated, event AND time agree (within 0.5 days)"},
-        {"bucket": "both_na", "patients": n_both_na, "%": round(100 * n_both_na / total, 1),
-         "meaning": "Both correctly say NA (Liu's documented exclusions)"},
-        {"bucket": "der_pop_cdr_na", "patients": n_der_pop_cdr_na, "%": round(100 * n_der_pop_cdr_na / total, 1),
-         "meaning": "We populated, Liu didn't"},
-        {"bucket": "mismatch", "patients": n_mismatch, "%": round(100 * n_mismatch / total, 1),
-         "meaning": "Both populated, disagree on event or time"},
-        {"bucket": "cdr_pop_der_na", "patients": n_cdr_pop_der_na, "%": round(100 * n_cdr_pop_der_na / total, 1),
-         "meaning": "Liu populated, we don't"},
-    ])
+    bucket_df = pd.DataFrame(
+        [
+            {
+                "bucket": "match",
+                "patients": n_match,
+                "%": round(100 * n_match / total, 1),
+                "meaning": "Both populated, event AND time agree (within 0.5 days)",
+            },
+            {
+                "bucket": "both_na",
+                "patients": n_both_na,
+                "%": round(100 * n_both_na / total, 1),
+                "meaning": "Both correctly say NA (Liu's documented exclusions)",
+            },
+            {
+                "bucket": "der_pop_cdr_na",
+                "patients": n_der_pop_cdr_na,
+                "%": round(100 * n_der_pop_cdr_na / total, 1),
+                "meaning": "We populated, Liu didn't",
+            },
+            {
+                "bucket": "mismatch",
+                "patients": n_mismatch,
+                "%": round(100 * n_mismatch / total, 1),
+                "meaning": "Both populated, disagree on event or time",
+            },
+            {
+                "bucket": "cdr_pop_der_na",
+                "patients": n_cdr_pop_der_na,
+                "%": round(100 * n_cdr_pop_der_na / total, 1),
+                "meaning": "Liu populated, we don't",
+            },
+        ]
+    )
 
     # Three more useful framings
     n_liu_pop = n_match + n_mismatch + n_cdr_pop_der_na
@@ -186,12 +207,30 @@ def main() -> None:
                 n_agreement_30d += 1
     rate_agreement = 100 * n_agreement_30d / total
 
-    rate_df = pd.DataFrame([
-        {"framing": "Agreement rate (both NA OR both populated within 30d)", "math": f"{n_agreement_30d} / {total}", "rate": f"{rate_agreement:.1f}%"},
-        {"framing": "Match where Liu populated", "math": f"{n_match} / {n_liu_pop}", "rate": f"{rate_liu_pop:.1f}%"},
-        {"framing": "Match where both populated (exact event + time)", "math": f"{n_match} / {n_both_pop}", "rate": f"{rate_both_pop:.1f}%"},
-        {"framing": "Event-direction agreement where both populated", "math": f"{both_dir_agree} / {n_both_pop}", "rate": f"{rate_dir:.1f}%"},
-    ])
+    rate_df = pd.DataFrame(
+        [
+            {
+                "framing": "Agreement rate (both NA OR both populated within 30d)",
+                "math": f"{n_agreement_30d} / {total}",
+                "rate": f"{rate_agreement:.1f}%",
+            },
+            {
+                "framing": "Match where Liu populated",
+                "math": f"{n_match} / {n_liu_pop}",
+                "rate": f"{rate_liu_pop:.1f}%",
+            },
+            {
+                "framing": "Match where both populated (exact event + time)",
+                "math": f"{n_match} / {n_both_pop}",
+                "rate": f"{rate_both_pop:.1f}%",
+            },
+            {
+                "framing": "Event-direction agreement where both populated",
+                "math": f"{both_dir_agree} / {n_both_pop}",
+                "rate": f"{rate_dir:.1f}%",
+            },
+        ]
+    )
 
     # Per-project population
     pop_per_proj = (
@@ -215,36 +254,40 @@ def main() -> None:
     n_overpop_event1 = int((overpop["dfi_event"] == 1).sum())
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        bucket_table=to_md(bucket_df),
-        rate_table=to_md(rate_df),
-        population_table=to_md(pop_per_proj),
-        n_match=n_match,
-        n_mismatch=n_mismatch,
-        n_both_na=n_both_na,
-        n_cdr_pop_der_na=n_cdr_pop_der_na,
-        n_der_pop_cdr_na=n_der_pop_cdr_na,
-        rate_liu_pop=rate_liu_pop,
-        rate_agreement=rate_agreement,
-        rate_dir=rate_dir,
-        n_dir_mm=n_dir_mm,
-        n_time_mm=n_time_mm,
-        n_liu0_ours1=n_liu0_ours1,
-        n_liu1_ours0=n_liu1_ours0,
-        median_time_diff=median_time_diff,
-        brca_underpop=underpop_proj.get("BRCA", 0),
-        tgct_underpop=underpop_proj.get("TGCT", 0),
-        coad_overpop=overpop_proj.get("COAD", 0),
-        lusc_overpop=overpop_proj.get("LUSC", 0),
-        luad_overpop=overpop_proj.get("LUAD", 0),
-        prad_overpop=overpop_proj.get("PRAD", 0),
-        n_overpop_event0=n_overpop_event0,
-        n_overpop_event1=n_overpop_event1,
-    ))
+    OUT.write_text(
+        REPORT.format(
+            bucket_table=to_md(bucket_df),
+            rate_table=to_md(rate_df),
+            population_table=to_md(pop_per_proj),
+            n_match=n_match,
+            n_mismatch=n_mismatch,
+            n_both_na=n_both_na,
+            n_cdr_pop_der_na=n_cdr_pop_der_na,
+            n_der_pop_cdr_na=n_der_pop_cdr_na,
+            rate_liu_pop=rate_liu_pop,
+            rate_agreement=rate_agreement,
+            rate_dir=rate_dir,
+            n_dir_mm=n_dir_mm,
+            n_time_mm=n_time_mm,
+            n_liu0_ours1=n_liu0_ours1,
+            n_liu1_ours0=n_liu1_ours0,
+            median_time_diff=median_time_diff,
+            brca_underpop=underpop_proj.get("BRCA", 0),
+            tgct_underpop=underpop_proj.get("TGCT", 0),
+            coad_overpop=overpop_proj.get("COAD", 0),
+            lusc_overpop=overpop_proj.get("LUSC", 0),
+            luad_overpop=overpop_proj.get("LUAD", 0),
+            prad_overpop=overpop_proj.get("PRAD", 0),
+            n_overpop_event0=n_overpop_event0,
+            n_overpop_event1=n_overpop_event1,
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
     print(f"  buckets: {dict(cnt)}")
     print(f"  match where Liu populated: {rate_liu_pop:.1f}%  ({n_match}/{n_liu_pop})")
-    print(f"  direction agree where both populated: {rate_dir:.1f}%  ({both_dir_agree}/{n_both_pop})")
+    print(
+        f"  direction agree where both populated: {rate_dir:.1f}%  ({both_dir_agree}/{n_both_pop})"
+    )
 
 
 if __name__ == "__main__":

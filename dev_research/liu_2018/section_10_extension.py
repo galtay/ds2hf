@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import ENDPOINTS, load_df, to_md
 
 HERE = Path(__file__).parent
@@ -64,17 +63,23 @@ def main() -> None:
     df = load_df()
     ext = df[~df["cdr_matched"]]
 
-    coverage = pd.DataFrame([
-        {
-            "endpoint": ep,
-            "post-freeze patients with re-derived value": int(ext[f"{ep.lower()}_event"].notna().sum()),
-            "of total post-freeze": len(ext),
-        }
-        for ep in ENDPOINTS
-    ])
+    coverage = pd.DataFrame(
+        [
+            {
+                "endpoint": ep,
+                "post-freeze patients with re-derived value": int(
+                    ext[f"{ep.lower()}_event"].notna().sum()
+                ),
+                "of total post-freeze": len(ext),
+            }
+            for ep in ENDPOINTS
+        ]
+    )
 
     per_proj = (
-        ext.groupby("project").size().reset_index(name="post-freeze patients")
+        ext.groupby("project")
+        .size()
+        .reset_index(name="post-freeze patients")
         .sort_values("post-freeze patients", ascending=False)
     )
 
@@ -82,17 +87,21 @@ def main() -> None:
     luad_ext = int(ext[ext["project"] == "LUAD"].shape[0])
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        n_total=len(df),
-        n_matched=int(df["cdr_matched"].sum()),
-        n_ext=len(ext),
-        coverage_table=to_md(coverage),
-        per_project_table=to_md(per_proj),
-        tgct_ext=tgct_ext,
-        luad_ext=luad_ext,
-    ))
+    OUT.write_text(
+        REPORT.format(
+            n_total=len(df),
+            n_matched=int(df["cdr_matched"].sum()),
+            n_ext=len(ext),
+            coverage_table=to_md(coverage),
+            per_project_table=to_md(per_proj),
+            tgct_ext=tgct_ext,
+            luad_ext=luad_ext,
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
-    print(f"  Post-freeze patients: {len(ext)} across {(per_proj['post-freeze patients']>0).sum()} projects")
+    print(
+        f"  Post-freeze patients: {len(ext)} across {(per_proj['post-freeze patients'] > 0).sum()} projects"
+    )
 
 
 if __name__ == "__main__":

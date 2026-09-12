@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-
 from cohort import load_df, to_md
 
 HERE = Path(__file__).parent
@@ -60,23 +58,34 @@ def main() -> None:
     direction = mm.groupby(["cdr_OS", "os_event"]).size().reset_index(name="count")
     direction.columns = ["Liu cdr_OS", "ours os_event", "patients"]
 
-    per_proj = mm.groupby("project").size().reset_index(name="event mismatches").sort_values("event mismatches", ascending=False)
+    per_proj = (
+        mm.groupby("project")
+        .size()
+        .reset_index(name="event mismatches")
+        .sort_values("event mismatches", ascending=False)
+    )
 
-    sample = mm[
-        ["case_submitter_id", "project", "cdr_OS", "cdr_OS_time", "os_event", "os_time"]
-    ].rename(columns={
-        "cdr_OS": "Liu OS",
-        "cdr_OS_time": "Liu OS_time",
-        "os_event": "ours OS",
-        "os_time": "ours OS_time",
-    }).head(10)
+    sample = (
+        mm[["case_submitter_id", "project", "cdr_OS", "cdr_OS_time", "os_event", "os_time"]]
+        .rename(
+            columns={
+                "cdr_OS": "Liu OS",
+                "cdr_OS_time": "Liu OS_time",
+                "os_event": "ours OS",
+                "os_time": "ours OS_time",
+            }
+        )
+        .head(10)
+    )
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        direction_table=to_md(direction),
-        per_project_table=to_md(per_proj),
-        sample_table=to_md(sample),
-    ))
+    OUT.write_text(
+        REPORT.format(
+            direction_table=to_md(direction),
+            per_project_table=to_md(per_proj),
+            sample_table=to_md(sample),
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
     print(f"  Total OS event mismatches: {len(mm)}")
 

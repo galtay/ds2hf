@@ -412,12 +412,12 @@ def main() -> None:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     title = "Reproducing Liu et al. 2018 — TCGA Pan-Cancer Clinical Data Resource"
     subtitle = (
-        'Liu J, Lichtenberg T, Hoadley KA, et al. '
-        '<em>An Integrated TCGA Pan-Cancer Clinical Data Resource to Drive '
-        'High-Quality Survival Outcome Analytics.</em> '
-        '<strong>Cell</strong> 173(2):400–416 (2018). '
+        "Liu J, Lichtenberg T, Hoadley KA, et al. "
+        "<em>An Integrated TCGA Pan-Cancer Clinical Data Resource to Drive "
+        "High-Quality Survival Outcome Analytics.</em> "
+        "<strong>Cell</strong> 173(2):400–416 (2018). "
         '<a href="https://doi.org/10.1016/j.cell.2018.02.052">'
-        'DOI 10.1016/j.cell.2018.02.052</a>'
+        "DOI 10.1016/j.cell.2018.02.052</a>"
     )
 
     html = f"""<!DOCTYPE html>
@@ -454,7 +454,9 @@ def main() -> None:
 </html>
 """
     OUT.write_text(html)
-    print(f"Wrote {OUT.relative_to(HERE.parent.parent)}  ({len(files)} sections, {len(toc_entries)} TOC entries)")
+    print(
+        f"Wrote {OUT.relative_to(HERE.parent.parent)}  ({len(files)} sections, {len(toc_entries)} TOC entries)"
+    )
     print(f"  open: file://{OUT}")
 
 

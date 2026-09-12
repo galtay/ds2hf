@@ -271,9 +271,7 @@ Demographic = _make_entity("Demographic", DEMOGRAPHIC_FIELDS)
 Treatment = _make_entity("Treatment", TREATMENT_FIELDS)
 PathologyDetail = _make_entity("PathologyDetail", PATHOLOGY_DETAIL_FIELDS)
 MolecularTest = _make_entity("MolecularTest", MOLECULAR_TEST_FIELDS)
-OtherClinicalAttribute = _make_entity(
-    "OtherClinicalAttribute", OTHER_CLINICAL_ATTRIBUTE_FIELDS
-)
+OtherClinicalAttribute = _make_entity("OtherClinicalAttribute", OTHER_CLINICAL_ATTRIBUTE_FIELDS)
 Program = _make_entity("Program", PROGRAM_FIELDS)
 TissueSourceSite = _make_entity("TissueSourceSite", TISSUE_SOURCE_SITE_FIELDS)
 Diagnosis = _make_entity(
@@ -577,9 +575,7 @@ class ProteinExpression(_ProteinExpressionBase):
 
     def as_dict(self) -> dict[str, float | None]:
         """{peptide_target: protein_expression} for this portion."""
-        return dict(
-            zip(self.peptide_target or [], self.protein_expression or [], strict=True)
-        )
+        return dict(zip(self.peptide_target or [], self.protein_expression or [], strict=True))
 
 
 _SsgseaScoresBase = _make_entity(
@@ -619,6 +615,7 @@ class SsgseaScores(_SsgseaScoresBase):
     def as_dict(self) -> dict[str, float]:
         """{pathway: score_raw} for this aliquot."""
         return dict(zip(self.pathway or [], self.score_raw or [], strict=True))
+
 
 # ---------------------------------------------------------------------------
 # Patient: top-level row entity with cross-modality joins

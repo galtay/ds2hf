@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-
 from cohort import load_df, to_md
 
 HERE = Path(__file__).parent
@@ -68,15 +66,19 @@ def main() -> None:
     direction.columns = ["Liu cdr_DSS", "ours dss_event", "patients"]
 
     per_proj = (
-        mm.groupby("project").size().reset_index(name="event mismatches")
+        mm.groupby("project")
+        .size()
+        .reset_index(name="event mismatches")
         .sort_values("event mismatches", ascending=False)
     )
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        direction_table=to_md(direction),
-        per_project_table=to_md(per_proj),
-    ))
+    OUT.write_text(
+        REPORT.format(
+            direction_table=to_md(direction),
+            per_project_table=to_md(per_proj),
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
     print(f"  Total DSS event mismatches: {len(mm)}")
 

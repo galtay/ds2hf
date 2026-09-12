@@ -21,7 +21,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import ENDPOINTS, load_df, to_md
 
 HERE = Path(__file__).parent
@@ -40,7 +39,6 @@ def _km_rate_at(times: pd.Series, events: pd.Series, day: float) -> float | None
     if df.empty:
         return None
     df = df.sort_values("t").reset_index(drop=True)
-    n = len(df)
     surv = 1.0
     for t, sub in df[df["e"] == 1].groupby("t"):
         d = len(sub)
@@ -78,14 +76,16 @@ def build_landscape(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
             r1 = _km_rate_at(populated[t_col], populated[ev_col], 365.25)
             r3 = _km_rate_at(populated[t_col], populated[ev_col], 365.25 * 3)
             r5 = _km_rate_at(populated[t_col], populated[ev_col], 365.25 * 5)
-            rows.append({
-                "project": proj,
-                "N (populated)": n,
-                "events": events,
-                "1-yr": _format_pct(r1),
-                "3-yr": _format_pct(r3),
-                "5-yr": _format_pct(r5),
-            })
+            rows.append(
+                {
+                    "project": proj,
+                    "N (populated)": n,
+                    "events": events,
+                    "1-yr": _format_pct(r1),
+                    "3-yr": _format_pct(r3),
+                    "5-yr": _format_pct(r5),
+                }
+            )
         out[ep] = pd.DataFrame(rows).sort_values("project").reset_index(drop=True)
     return out
 

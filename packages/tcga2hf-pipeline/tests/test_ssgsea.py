@@ -214,10 +214,17 @@ def test_stats_rows_carry_project_and_pan_cancer(tmp_path: Path) -> None:
     def _write(proj: str, scores: list[float], sample_types: list[str]) -> None:
         rows = [
             {
-                "case_id": f"c{i}", "case_submitter_id": f"C{i}", "sample_id": f"s{i}",
-                "sample_submitter_id": f"S{i}", "sample_type": st, "aliquot_id": f"a{i}",
-                "aliquot_submitter_id": f"A{i}", "source_file_id": f"f{i}",
-                "pathway": "P1", "matched_gene_count": 10, "original_gene_count": 12,
+                "case_id": f"c{i}",
+                "case_submitter_id": f"C{i}",
+                "sample_id": f"s{i}",
+                "sample_submitter_id": f"S{i}",
+                "sample_type": st,
+                "aliquot_id": f"a{i}",
+                "aliquot_submitter_id": f"A{i}",
+                "source_file_id": f"f{i}",
+                "pathway": "P1",
+                "matched_gene_count": 10,
+                "original_gene_count": 12,
                 "score_raw": v,
             }
             for i, (v, st) in enumerate(zip(scores, sample_types, strict=True))
@@ -243,8 +250,11 @@ def test_stats_rows_carry_project_and_pan_cancer(tmp_path: Path) -> None:
     assert own[0]["n_aliquots"] == 2 and own[0]["mean"] == pytest.approx(2.0)
     assert own[0]["project_id"] == "TCGA-AA" and pan[0]["project_id"] is None
     # Both projects must carry byte-equal pan-cancer rows.
-    assert pan == [r for r in by_project["TCGA-BB"] if r["population"] == "pan_cancer"
-                   and r["sample_type"] is None]
+    assert pan == [
+        r
+        for r in by_project["TCGA-BB"]
+        if r["population"] == "pan_cancer" and r["sample_type"] is None
+    ]
 
 
 def test_stats_expose_the_gsva_divisor(tmp_path: Path) -> None:
@@ -263,13 +273,22 @@ def test_stats_expose_the_gsva_divisor(tmp_path: Path) -> None:
     rows = []
     for i in range(20):
         for p in ("P1", "P2"):
-            rows.append({
-                "case_id": f"c{i}", "case_submitter_id": None, "sample_id": None,
-                "sample_submitter_id": None, "sample_type": "Primary Tumor",
-                "aliquot_id": f"a{i}", "aliquot_submitter_id": None, "source_file_id": None,
-                "pathway": p, "matched_gene_count": 10, "original_gene_count": 10,
-                "score_raw": float(rng.normal(0, 100)),
-            })
+            rows.append(
+                {
+                    "case_id": f"c{i}",
+                    "case_submitter_id": None,
+                    "sample_id": None,
+                    "sample_submitter_id": None,
+                    "sample_type": "Primary Tumor",
+                    "aliquot_id": f"a{i}",
+                    "aliquot_submitter_id": None,
+                    "source_file_id": None,
+                    "pathway": p,
+                    "matched_gene_count": 10,
+                    "original_gene_count": 10,
+                    "score_raw": float(rng.normal(0, 100)),
+                }
+            )
     out = tmp_path / "TCGA-XX" / "ssgsea_scores_hallmark" / "data.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(rows, schema=TABULAR_TABLES["ssgsea_scores_hallmark"]), out)
@@ -289,12 +308,22 @@ def test_stats_sd_is_null_for_single_observation(tmp_path: Path) -> None:
     from tcga2hf.schema import TABULAR_TABLES
     from tcga2hf_pipeline import tabular
 
-    rows = [{
-        "case_id": "c", "case_submitter_id": None, "sample_id": None,
-        "sample_submitter_id": None, "sample_type": "Primary Tumor", "aliquot_id": "a",
-        "aliquot_submitter_id": None, "source_file_id": None, "pathway": "P1",
-        "matched_gene_count": 10, "original_gene_count": 10, "score_raw": 1.0,
-    }]
+    rows = [
+        {
+            "case_id": "c",
+            "case_submitter_id": None,
+            "sample_id": None,
+            "sample_submitter_id": None,
+            "sample_type": "Primary Tumor",
+            "aliquot_id": "a",
+            "aliquot_submitter_id": None,
+            "source_file_id": None,
+            "pathway": "P1",
+            "matched_gene_count": 10,
+            "original_gene_count": 10,
+            "score_raw": 1.0,
+        }
+    ]
     out = tmp_path / "TCGA-XX" / "ssgsea_scores_hallmark" / "data.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(rows, schema=TABULAR_TABLES["ssgsea_scores_hallmark"]), out)

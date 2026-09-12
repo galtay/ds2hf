@@ -249,9 +249,7 @@ def test_rppa_resolves_sample_through_the_portion(tmp_path: Path) -> None:
             }
         ],
     )
-    rows = protein_expression.attach(
-        [_patient_row()], protein_expression.load_for_project(project)
-    )
+    rows = protein_expression.attach([_patient_row()], protein_expression.load_for_project(project))
     rec = rows[0]["samples_protein_expression_quantification"][0]
 
     assert rec["portion_id"] == _PORTION_UUID

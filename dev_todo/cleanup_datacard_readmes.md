@@ -1,6 +1,6 @@
 Lets cleanup the HF dataset cards.
 
-Goals: 
+Goals:
 
 * keep it minimal and scoped to things that will not change (e.g. link to the top level repo instead of specific files as the links are already stale).
 * describe what we did and how it was constructed. leave usage instructions minimal

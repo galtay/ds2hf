@@ -478,9 +478,7 @@ def test_absolute_gene_level_needs_no_pair_lookup(tmp_path: Path) -> None:
 
 def test_paired_gene_level_resolves_tumor_via_segment_file(tmp_path: Path) -> None:
     _allele_specific_project(tmp_path)  # ASCAT3 seg file naming the tumour
-    project = _gene_level_project(
-        tmp_path, workflow="ASCAT3", entities=_paired_entities()
-    )
+    project = _gene_level_project(tmp_path, workflow="ASCAT3", entities=_paired_entities())
     rows = _gene_level_rows([_case()], project)
     assert len(rows) == 3
     assert rows[0]["aliquot_id"] == _TUMOR_ALIQUOT
@@ -494,9 +492,7 @@ def test_paired_gene_level_is_skipped_when_the_pair_is_unresolvable(tmp_path: Pa
     Guessing from entity order or barcode digits would silently mislabel
     every matched normal as the tumour.
     """
-    project = _gene_level_project(
-        tmp_path, workflow="ASCAT3", entities=_paired_entities()
-    )
+    project = _gene_level_project(tmp_path, workflow="ASCAT3", entities=_paired_entities())
     assert _gene_level_rows([_case()], project) == []
 
 
@@ -515,9 +511,7 @@ def test_streaming_writer_round_trips_gene_level_rows(tmp_path: Path) -> None:
 
     _allele_specific_project(tmp_path)
     project = _gene_level_project(tmp_path, workflow="ASCAT3", entities=_paired_entities())
-    tables = {
-        "gene_level_copy_number": tabular._gene_level_copy_number_batches([_case()], project)
-    }
+    tables = {"gene_level_copy_number": tabular._gene_level_copy_number_batches([_case()], project)}
     out = tabular.write_tables(tables, tmp_path / "processed", "TCGA-XYZ")
     written = pq.read_table(out["gene_level_copy_number"])
     assert written.num_rows == 3

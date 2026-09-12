@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-
 from cohort import load_df, to_md
 
 HERE = Path(__file__).parent
@@ -76,17 +74,21 @@ def main() -> None:
     median_diff = int(time_mm["diff"].median()) if len(time_mm) else 0
 
     per_proj = (
-        ev_mm.groupby("project").size().reset_index(name="event mismatches")
+        ev_mm.groupby("project")
+        .size()
+        .reset_index(name="event mismatches")
         .sort_values("event mismatches", ascending=False)
     )
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        direction_table=to_md(direction),
-        per_project_table=to_md(per_proj),
-        n_time_mm=len(time_mm),
-        median_diff=median_diff,
-    ))
+    OUT.write_text(
+        REPORT.format(
+            direction_table=to_md(direction),
+            per_project_table=to_md(per_proj),
+            n_time_mm=len(time_mm),
+            median_diff=median_diff,
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
     print(f"  PFI event mismatches: {len(ev_mm)}, time-only: {len(time_mm)}")
 

@@ -76,9 +76,7 @@ def test_bulk_download_retries_on_truncated_tar(tmp_path: Path) -> None:
     """A truncated tar.gz (GDC drops the connection mid-stream) raises EOFError
     inside tarfile; the retry decorator must redrive the batch instead of
     surfacing the error to the caller."""
-    good_tar = _make_bulk_tar(
-        {"uuid-a/file_a.bin": b"AAAA", "uuid-b/file_b.bin": b"BBBB"}
-    )
+    good_tar = _make_bulk_tar({"uuid-a/file_a.bin": b"AAAA", "uuid-b/file_b.bin": b"BBBB"})
     truncated = good_tar[: len(good_tar) // 2]  # cut off mid-stream
 
     call_count = {"n": 0}

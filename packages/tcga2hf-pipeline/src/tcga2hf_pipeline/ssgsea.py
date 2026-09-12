@@ -148,9 +148,9 @@ def ssgsea_scores(
         for i, gs in enumerate(gene_sets):
             tail = n_genes - position[gs] + 1.0  # (n - p + 1) per member
             w = weight[gs]
-            out[i, j] = (w * tail).sum() / w.sum() - (
-                total_positions - tail.sum()
-            ) / (n_genes - gs.size)
+            out[i, j] = (w * tail).sum() / w.sum() - (total_positions - tail.sum()) / (
+                n_genes - gs.size
+            )
     return out
 
 

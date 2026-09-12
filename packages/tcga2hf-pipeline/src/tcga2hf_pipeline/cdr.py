@@ -108,9 +108,7 @@ def load_cdr_index(raw_dir: Path) -> dict[str, dict[str, Any]]:
 
     df = pd.read_excel(cdr_path, sheet_name=_CDR_SHEET)
     if _CDR_JOIN_KEY not in df.columns:
-        raise RuntimeError(
-            f"CDR workbook sheet {_CDR_SHEET!r} missing join key {_CDR_JOIN_KEY!r}"
-        )
+        raise RuntimeError(f"CDR workbook sheet {_CDR_SHEET!r} missing join key {_CDR_JOIN_KEY!r}")
 
     out: dict[str, dict[str, Any]] = {}
     for _, row in df.iterrows():

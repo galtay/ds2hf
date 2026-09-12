@@ -241,9 +241,7 @@ class GDCClient:
         are in `_BULK_RETRYABLE`, so the whole batch retries cleanly.
         """
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", dir=out_dir) as tmp:
-            with self._client.stream(
-                "POST", "/data", json={"ids": batch}, timeout=300.0
-            ) as resp:
+            with self._client.stream("POST", "/data", json={"ids": batch}, timeout=300.0) as resp:
                 resp.raise_for_status()
                 for chunk in resp.iter_bytes():
                     tmp.write(chunk)

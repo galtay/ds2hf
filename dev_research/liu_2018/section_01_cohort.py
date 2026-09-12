@@ -36,7 +36,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import iter_all_rows, load_demo, load_df, to_md
 
 HERE = Path(__file__).parent
@@ -64,7 +63,13 @@ _STAGE_FIELDS = (
     "igcccg_stage",
 )
 
-_NA_TOKENS = {"[Not Available]", "[Not Applicable]", "[Unknown]", "[Discrepancy]", "[Not Evaluated]"}
+_NA_TOKENS = {
+    "[Not Available]",
+    "[Not Applicable]",
+    "[Unknown]",
+    "[Discrepancy]",
+    "[Not Evaluated]",
+}
 
 
 def _resolve_skcm_stage(row: dict) -> str | None:
@@ -72,7 +77,7 @@ def _resolve_skcm_stage(row: dict) -> str | None:
     dxs = row.get("diagnoses") or []
     dxs_sorted = sorted(
         dxs,
-        key=lambda d: (d.get("days_to_diagnosis") if d.get("days_to_diagnosis") is not None else 1e9),
+        key=lambda d: d.get("days_to_diagnosis") if d.get("days_to_diagnosis") is not None else 1e9,
     )
     for dx in dxs_sorted:
         for f in _STAGE_FIELDS:
@@ -154,14 +159,20 @@ def _format_table1(df: pd.DataFrame) -> pd.DataFrame:
     return (
         df.groupby("project")
         .apply(
-            lambda d: pd.Series({
-                "N": len(d),
-                "Age": f"{d['age'].mean():.1f} ± {d['age'].std():.1f}",
-                "Gender M/F": f"{(d['gender']=='male').sum()}/{(d['gender']=='female').sum()}",
-                "Race White/Black/Other/NA": _packed(d["race_bucket"], ["White", "Black", "Other", "NA"]),
-                "Stage 0/I/II/III/IV/NA": _packed(d["stage_bucket"], ["0", "I", "II", "III", "IV", "NA"]),
-                "Grade 1/2/3/4/NA": _packed(d["grade_bucket"], ["1", "2", "3", "4", "NA"]),
-            }),
+            lambda d: pd.Series(
+                {
+                    "N": len(d),
+                    "Age": f"{d['age'].mean():.1f} ± {d['age'].std():.1f}",
+                    "Gender M/F": f"{(d['gender'] == 'male').sum()}/{(d['gender'] == 'female').sum()}",
+                    "Race White/Black/Other/NA": _packed(
+                        d["race_bucket"], ["White", "Black", "Other", "NA"]
+                    ),
+                    "Stage 0/I/II/III/IV/NA": _packed(
+                        d["stage_bucket"], ["0", "I", "II", "III", "IV", "NA"]
+                    ),
+                    "Grade 1/2/3/4/NA": _packed(d["grade_bucket"], ["1", "2", "3", "4", "NA"]),
+                }
+            ),
             include_groups=False,
         )
         .reset_index()
@@ -182,9 +193,7 @@ def _apply_skcm_stage_override(demo: pd.DataFrame) -> pd.DataFrame:
 
 def build_from_gdc(demo: pd.DataFrame) -> pd.DataFrame:
     demo = demo.copy()
-    demo["age"] = (-demo["days_to_birth"] / 365.25).apply(
-        lambda x: int(x) if pd.notna(x) else x
-    )
+    demo["age"] = (-demo["days_to_birth"] / 365.25).apply(lambda x: int(x) if pd.notna(x) else x)
     demo["gender"] = demo["sex_at_birth"]
     demo["race_bucket"] = demo["race"].map(_race_bucket_modern)
     demo["stage_bucket"] = demo["stage_raw"].map(_stage_bucket)
@@ -263,27 +272,33 @@ def compare(
             if _cells_match(our_col, l_val, r_val):
                 n_match += 1
             else:
-                mismatches.append({
-                    "project": proj,
-                    "field": our_col,
-                    left_label: l_val,
-                    right_label: r_val,
-                })
-        summary_rows.append({
-            "field": our_col,
-            "match": f"{n_match}/{len(common)}",
-            "%": round(100 * n_match / len(common), 1),
-        })
+                mismatches.append(
+                    {
+                        "project": proj,
+                        "field": our_col,
+                        left_label: l_val,
+                        right_label: r_val,
+                    }
+                )
+        summary_rows.append(
+            {
+                "field": our_col,
+                "match": f"{n_match}/{len(common)}",
+                "%": round(100 * n_match / len(common), 1),
+            }
+        )
     return pd.DataFrame(summary_rows), pd.DataFrame(mismatches)
 
 
 def _liu_published_to_table_format(liu_csv: pd.DataFrame) -> pd.DataFrame:
-    return liu_csv.rename(columns={
-        "Gender_M_F": "Gender M/F",
-        "Race_W_B_O_NA": "Race White/Black/Other/NA",
-        "Stage_0_I_II_III_IV_NA": "Stage 0/I/II/III/IV/NA",
-        "Grade_1_2_3_4_NA": "Grade 1/2/3/4/NA",
-    })
+    return liu_csv.rename(
+        columns={
+            "Gender_M_F": "Gender M/F",
+            "Race_W_B_O_NA": "Race White/Black/Other/NA",
+            "Stage_0_I_II_III_IV_NA": "Stage 0/I/II/III/IV/NA",
+            "Grade_1_2_3_4_NA": "Grade 1/2/3/4/NA",
+        }
+    )
 
 
 REPORT = """\
@@ -354,9 +369,7 @@ def _verify_age(demo: pd.DataFrame, cdr_df: pd.DataFrame) -> dict[str, int | flo
     cdr = cdr_df.rename(columns={"bcr_patient_barcode": "case_submitter_id"})
     cdr["liu_age"] = cdr["age_at_initial_pathologic_diagnosis"]
     d = demo.copy()
-    d["gdc_age"] = (-d["days_to_birth"] / 365.25).apply(
-        lambda x: int(x) if pd.notna(x) else x
-    )
+    d["gdc_age"] = (-d["days_to_birth"] / 365.25).apply(lambda x: int(x) if pd.notna(x) else x)
     merged = d.merge(cdr[["case_submitter_id", "liu_age"]], on="case_submitter_id", how="inner")
     both = merged.dropna(subset=["gdc_age", "liu_age"])
     both = both.copy()
@@ -389,8 +402,10 @@ def main() -> None:
     # Sanity: CDR-aggregated reproduces the paper Table 1
     liu_pub = _liu_published_to_table_format(pd.read_csv(LIU_CSV))
     s_paper, m_paper = compare(
-        table1_cdr, liu_pub,
-        left_label="CDR-aggregated", right_label="Liu paper",
+        table1_cdr,
+        liu_pub,
+        left_label="CDR-aggregated",
+        right_label="Liu paper",
     )
     paper_match = sum(int(x.split("/")[0]) for x in s_paper["match"])
     paper_total = sum(int(x.split("/")[1]) for x in s_paper["match"])
@@ -398,8 +413,10 @@ def main() -> None:
 
     # Primary: modern GDC vs Liu CDR (same patients)
     s_drift, m_drift = compare(
-        table1_matched, table1_cdr,
-        left_label="ours", right_label="Liu CDR",
+        table1_matched,
+        table1_cdr,
+        left_label="ours",
+        right_label="Liu CDR",
     )
 
     # Cohort growth: per-project N change
@@ -407,7 +424,12 @@ def main() -> None:
     full_n = demo_full.groupby("project").size().rename("modern GDC")
     growth = pd.concat([cdr_n, full_n], axis=1).fillna(0).astype(int)
     growth["delta"] = growth["modern GDC"] - growth["Liu CDR"]
-    growth = growth[growth["delta"] != 0].sort_values("delta", ascending=False).reset_index().rename(columns={"type": "project"})
+    growth = (
+        growth[growth["delta"] != 0]
+        .sort_values("delta", ascending=False)
+        .reset_index()
+        .rename(columns={"type": "project"})
+    )
     growth = growth.rename(columns={"index": "project"})
     if "project" not in growth.columns:
         growth = growth.reset_index().rename(columns={"index": "project"})
@@ -433,12 +455,20 @@ def main() -> None:
     drift_match = sum(int(x.split("/")[0]) for x in s_drift["match"])
     drift_total = sum(int(x.split("/")[1]) for x in s_drift["match"])
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
-    print(f"  Per-patient age (floor of -days_to_birth/365.25 vs Liu CDR): "
-          f"{age_stats['exact']}/{age_stats['n']} exact ({age_stats['exact_pct']}%), "
-          f"{age_stats['pm1']}/{age_stats['n']} ±1yr ({age_stats['pm1_pct']}%)")
-    print(f"  CDR-aggregated vs paper Table 1: {paper_match}/{paper_total} ({paper_pct}%) [bucketing sanity]")
-    print(f"  Modern GDC vs Liu CDR (matched): {drift_match}/{drift_total} ({100*drift_match/drift_total:.1f}%) [primary drift signal]")
-    print(f"  Cohort growth: +{int(growth['delta'].clip(lower=0).sum())} patients across {(growth['delta']>0).sum()} projects")
+    print(
+        f"  Per-patient age (floor of -days_to_birth/365.25 vs Liu CDR): "
+        f"{age_stats['exact']}/{age_stats['n']} exact ({age_stats['exact_pct']}%), "
+        f"{age_stats['pm1']}/{age_stats['n']} ±1yr ({age_stats['pm1_pct']}%)"
+    )
+    print(
+        f"  CDR-aggregated vs paper Table 1: {paper_match}/{paper_total} ({paper_pct}%) [bucketing sanity]"
+    )
+    print(
+        f"  Modern GDC vs Liu CDR (matched): {drift_match}/{drift_total} ({100 * drift_match / drift_total:.1f}%) [primary drift signal]"
+    )
+    print(
+        f"  Cohort growth: +{int(growth['delta'].clip(lower=0).sum())} patients across {(growth['delta'] > 0).sum()} projects"
+    )
 
 
 if __name__ == "__main__":

@@ -289,9 +289,7 @@ def _patient_row(case: dict[str, Any]) -> dict[str, Any]:
         "case_id": case_id,
         "case_submitter_id": case.get("submitter_id"),
         "project_id": project.get("project_id"),
-        "gdc_portal_url": (
-            f"https://portal.gdc.cancer.gov/cases/{case_id}" if case_id else None
-        ),
+        "gdc_portal_url": (f"https://portal.gdc.cancer.gov/cases/{case_id}" if case_id else None),
         "primary_site": case.get("primary_site"),
         "disease_type": case.get("disease_type"),
         "index_date": case.get("index_date"),
@@ -300,9 +298,7 @@ def _patient_row(case: dict[str, Any]) -> dict[str, Any]:
         "days_to_lost_to_followup": case.get("days_to_lost_to_followup"),
         "lost_to_followup": case.get("lost_to_followup"),
         "annotations": _annotations(case),
-        "tissue_source_site": _pick(
-            case.get("tissue_source_site"), TISSUE_SOURCE_SITE_FIELDS
-        ),
+        "tissue_source_site": _pick(case.get("tissue_source_site"), TISSUE_SOURCE_SITE_FIELDS),
         "program": _pick(project.get("program"), PROGRAM_FIELDS),
         "summary": _summary_dict(case),
         "demographic": _pick(case.get("demographic"), DEMOGRAPHIC_FIELDS),
@@ -330,10 +326,14 @@ def _patient_row(case: dict[str, Any]) -> dict[str, Any]:
         # here as an all-null struct so pyarrow's `from_pylist(rows, schema=PATIENTS)`
         # can lift the column even when survival hasn't been attached yet.
         "survival_derived": {
-            "os_event": None, "os_time": None,
-            "dss_event": None, "dss_time": None,
-            "pfi_event": None, "pfi_time": None,
-            "dfi_event": None, "dfi_time": None,
+            "os_event": None,
+            "os_time": None,
+            "dss_event": None,
+            "dss_time": None,
+            "pfi_event": None,
+            "pfi_time": None,
+            "dfi_event": None,
+            "dfi_time": None,
         },
     }
 
@@ -350,8 +350,7 @@ def to_patient_rows(cases: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 _ROW_GROUP_SIZE = 50
 
 
-_SUPPLEMENT_FORMS = ("patient", "follow_ups", "ntes", "drugs",
-                     "radiations", "ablations", "omfs")
+_SUPPLEMENT_FORMS = ("patient", "follow_ups", "ntes", "drugs", "radiations", "ablations", "omfs")
 
 
 def _build_clinical_supplement_column(rows: list[dict[str, Any]]) -> pa.Array | None:

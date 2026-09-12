@@ -80,12 +80,9 @@ def load_for_project(project_raw_dir: Path) -> dict[str, list[dict[str, Any]]]:
                 "mirna_id": df["miRNA_ID"].tolist(),
                 "read_count": [None if pd.isna(v) else int(v) for v in df["read_count"]],
                 "reads_per_million_mirna_mapped": [
-                    None if pd.isna(v) else float(v)
-                    for v in df["reads_per_million_miRNA_mapped"]
+                    None if pd.isna(v) else float(v) for v in df["reads_per_million_miRNA_mapped"]
                 ],
-                "cross_mapped": [
-                    None if pd.isna(v) else str(v) for v in df["cross_mapped"]
-                ],
+                "cross_mapped": [None if pd.isna(v) else str(v) for v in df["cross_mapped"]],
             }
         )
     return dict(by_case)

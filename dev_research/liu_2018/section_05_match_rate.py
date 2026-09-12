@@ -22,7 +22,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import ENDPOINTS, load_df, to_md
 
 HERE = Path(__file__).parent
@@ -38,8 +37,7 @@ def classify(cdr_e, cdr_t, der_e, der_t) -> str:
     if pd.isna(der_e):
         return "cdr_pop_der_na"
     if cdr_e == der_e and (
-        (pd.isna(cdr_t) and pd.isna(der_t))
-        or abs((cdr_t or 0) - (der_t or 0)) < 0.5
+        (pd.isna(cdr_t) and pd.isna(der_t)) or abs((cdr_t or 0) - (der_t or 0)) < 0.5
     ):
         return "match"
     return "mismatch"
@@ -49,24 +47,28 @@ def cohort_summary(matched: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for ep in ENDPOINTS:
         cls = matched.apply(
-            lambda r: classify(
-                r[f"cdr_{ep}"], r[f"cdr_{ep}_time"],
-                r[f"{ep.lower()}_event"], r[f"{ep.lower()}_time"],
+            lambda r, ep=ep: classify(
+                r[f"cdr_{ep}"],
+                r[f"cdr_{ep}_time"],
+                r[f"{ep.lower()}_event"],
+                r[f"{ep.lower()}_time"],
             ),
             axis=1,
         )
         counts = cls.value_counts()
         total = len(cls)
-        rows.append({
-            "endpoint": ep,
-            "total": total,
-            "match": counts.get("match", 0),
-            "match %": round(100 * counts.get("match", 0) / total, 1),
-            "mismatch": counts.get("mismatch", 0),
-            "both NA": counts.get("both_na", 0),
-            "Liu only (cdr_pop_der_na)": counts.get("cdr_pop_der_na", 0),
-            "ours only (der_pop_cdr_na)": counts.get("der_pop_cdr_na", 0),
-        })
+        rows.append(
+            {
+                "endpoint": ep,
+                "total": total,
+                "match": counts.get("match", 0),
+                "match %": round(100 * counts.get("match", 0) / total, 1),
+                "mismatch": counts.get("mismatch", 0),
+                "both NA": counts.get("both_na", 0),
+                "Liu only (cdr_pop_der_na)": counts.get("cdr_pop_der_na", 0),
+                "ours only (der_pop_cdr_na)": counts.get("der_pop_cdr_na", 0),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -83,15 +85,17 @@ def per_project_match_rate(matched: pd.DataFrame) -> pd.DataFrame:
         row: dict = {"project": proj, "N": len(sub)}
         for ep in ENDPOINTS:
             cls = sub.apply(
-                lambda r: classify(
-                    r[f"cdr_{ep}"], r[f"cdr_{ep}_time"],
-                    r[f"{ep.lower()}_event"], r[f"{ep.lower()}_time"],
+                lambda r, ep=ep: classify(
+                    r[f"cdr_{ep}"],
+                    r[f"cdr_{ep}_time"],
+                    r[f"{ep.lower()}_event"],
+                    r[f"{ep.lower()}_time"],
                 ),
                 axis=1,
             )
             denom = cls.isin(["match", "mismatch", "cdr_pop_der_na"]).sum()
             n_match = (cls == "match").sum()
-            row[ep] = f"{n_match}/{denom} ({round(100*n_match/denom)}%)" if denom else "—"
+            row[ep] = f"{n_match}/{denom} ({round(100 * n_match / denom)}%)" if denom else "—"
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -153,14 +157,17 @@ def main() -> None:
     cohort = cohort_summary(matched)
     per_proj = per_project_match_rate(matched)
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(REPORT.format(
-        cohort_table=to_md(cohort),
-        project_table=to_md(per_proj),
-    ))
+    OUT.write_text(
+        REPORT.format(
+            cohort_table=to_md(cohort),
+            project_table=to_md(per_proj),
+        )
+    )
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
-    print(f"  Cohort match rates: " + "  ".join(
-        f"{r['endpoint']}={r['match %']}%" for _, r in cohort.iterrows()
-    ))
+    print(
+        "  Cohort match rates: "
+        + "  ".join(f"{r['endpoint']}={r['match %']}%" for _, r in cohort.iterrows())
+    )
 
 
 if __name__ == "__main__":

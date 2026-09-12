@@ -1217,16 +1217,21 @@ PATIENT_FIELDS: list[pa.Field] = [
     # `*_time` is days from `index_date` (TCGA: diagnosis date). DFI is
     # null for SKCM / THYM / UVM / LAML — Liu specifies no DFI for those
     # tumor types.
-    pa.field("survival_derived", pa.struct([
-        pa.field("os_event", pa.int64()),
-        pa.field("os_time", pa.float64()),
-        pa.field("dss_event", pa.int64()),
-        pa.field("dss_time", pa.float64()),
-        pa.field("pfi_event", pa.int64()),
-        pa.field("pfi_time", pa.float64()),
-        pa.field("dfi_event", pa.int64()),
-        pa.field("dfi_time", pa.float64()),
-    ])),
+    pa.field(
+        "survival_derived",
+        pa.struct(
+            [
+                pa.field("os_event", pa.int64()),
+                pa.field("os_time", pa.float64()),
+                pa.field("dss_event", pa.int64()),
+                pa.field("dss_time", pa.float64()),
+                pa.field("pfi_event", pa.int64()),
+                pa.field("pfi_time", pa.float64()),
+                pa.field("dfi_event", pa.int64()),
+                pa.field("dfi_time", pa.float64()),
+            ]
+        ),
+    ),
     # Case-level curator annotations — the QC flags that say a case was
     # redacted, has a prior malignancy, or is otherwise "do not use".
     pa.field("annotations", pa.list_(pa.struct(ANNOTATION_FIELDS))),
@@ -1269,6 +1274,7 @@ PATIENT_FIELDS: list[pa.Field] = [
         ),
     ),
 ]
+
 
 # ssGSEA columns are appended after SSGSEA_COLLECTIONS is declared (below),
 # so PATIENT_FIELDS stays the single ordered source of truth for the row.

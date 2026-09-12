@@ -201,6 +201,12 @@ def test_build_tables_without_filter_builds_everything(tmp_path: Path) -> None:
     project_dir = _build_synthetic_pathology_project(tmp_path)
     cases = [{"case_id": _CASE_UUID, "submitter_id": "TCGA-W5-AA2X", "samples": []}]
     tables = tabular.build_tables(cases, project_dir)
-    for name in ("cases", "masked_somatic_mutation", "gene_expression_quantification",
-                 "files", "survival_derived", "pathology_report"):
+    for name in (
+        "cases",
+        "masked_somatic_mutation",
+        "gene_expression_quantification",
+        "files",
+        "survival_derived",
+        "pathology_report",
+    ):
         assert name in tables

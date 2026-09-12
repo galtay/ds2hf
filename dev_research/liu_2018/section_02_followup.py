@@ -24,7 +24,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
 from cohort import DAYS_PER_MONTH, ENDPOINTS, load_df, to_md
 
 HERE = Path(__file__).parent
@@ -34,10 +33,14 @@ CDR_XLSX = Path.home() / "data" / "tcga2hf" / "raw" / "cdr" / "TCGA-CDR-Suppleme
 
 TIME_COLS = (
     "FollowUp",
-    "OS_event", "OS_censor",
-    "PFI_event", "PFI_censor",
-    "DFI_event", "DFI_censor",
-    "DSS_event", "DSS_censor",
+    "OS_event",
+    "OS_censor",
+    "PFI_event",
+    "PFI_censor",
+    "DFI_event",
+    "DFI_censor",
+    "DSS_event",
+    "DSS_censor",
 )
 
 
@@ -89,22 +92,26 @@ def compare(
             continue
         n_match = 0
         for proj in common:
-            l = left.at[proj, col]
-            r = right.at[proj, col]
-            if _cells_match(l, r):
+            lhs = left.at[proj, col]
+            rhs = right.at[proj, col]
+            if _cells_match(lhs, rhs):
                 n_match += 1
             else:
-                mismatches.append({
-                    "project": proj,
-                    "field": col,
-                    left_label: "" if pd.isna(l) else f"{l:.1f}",
-                    right_label: "" if pd.isna(r) else f"{r:.1f}",
-                })
-        summary_rows.append({
-            "field": col,
-            "match": f"{n_match}/{len(common)}",
-            "%": round(100 * n_match / len(common), 1),
-        })
+                mismatches.append(
+                    {
+                        "project": proj,
+                        "field": col,
+                        left_label: "" if pd.isna(lhs) else f"{lhs:.1f}",
+                        right_label: "" if pd.isna(rhs) else f"{rhs:.1f}",
+                    }
+                )
+        summary_rows.append(
+            {
+                "field": col,
+                "match": f"{n_match}/{len(common)}",
+                "%": round(100 * n_match / len(common), 1),
+            }
+        )
     return pd.DataFrame(summary_rows), pd.DataFrame(mismatches)
 
 
@@ -162,10 +169,12 @@ Same as Section 1: the CDR workbook ships per-patient values, so the cell-level 
 
 def main() -> None:
     cdr_df = pd.read_excel(CDR_XLSX, sheet_name="TCGA-CDR")
-    cdr_df = cdr_df.rename(columns={
-        "bcr_patient_barcode": "case_submitter_id",
-        "type": "project",
-    })
+    cdr_df = cdr_df.rename(
+        columns={
+            "bcr_patient_barcode": "case_submitter_id",
+            "type": "project",
+        }
+    )
     cdr_ep_cols = {
         "OS": ("OS", "OS.time"),
         "DSS": ("DSS", "DSS.time"),
@@ -189,14 +198,18 @@ def main() -> None:
     # Sanity: CDR aggregation reproduces paper Table 2
     liu_pub = pd.read_csv(LIU_CSV)
     s_paper, m_paper = compare(
-        table2_cdr, liu_pub,
-        left_label="CDR-aggregated", right_label="Liu paper",
+        table2_cdr,
+        liu_pub,
+        left_label="CDR-aggregated",
+        right_label="Liu paper",
     )
 
     # Drift: ours-matched vs CDR-aggregated
     s_drift, m_drift = compare(
-        table2_matched, table2_cdr,
-        left_label="ours", right_label="Liu CDR",
+        table2_matched,
+        table2_cdr,
+        left_label="ours",
+        right_label="Liu CDR",
     )
 
     paper_match = sum(int(x.split("/")[0]) for x in s_paper["match"])
@@ -219,8 +232,12 @@ def main() -> None:
     OUT.write_text(body)
 
     print(f"Wrote {OUT.relative_to(HERE.parent.parent)}")
-    print(f"  CDR-aggregated vs paper Table 2: {paper_match}/{paper_total} ({100*paper_match/paper_total:.1f}%) [bucketing sanity]")
-    print(f"  Modern GDC vs Liu CDR (matched): {drift_match}/{drift_total} ({100*drift_match/drift_total:.1f}%) [primary drift signal]")
+    print(
+        f"  CDR-aggregated vs paper Table 2: {paper_match}/{paper_total} ({100 * paper_match / paper_total:.1f}%) [bucketing sanity]"
+    )
+    print(
+        f"  Modern GDC vs Liu CDR (matched): {drift_match}/{drift_total} ({100 * drift_match / drift_total:.1f}%) [primary drift signal]"
+    )
 
 
 if __name__ == "__main__":

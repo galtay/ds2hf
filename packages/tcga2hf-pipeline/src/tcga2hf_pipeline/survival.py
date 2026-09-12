@@ -424,11 +424,7 @@ def _is_disease_free(case: dict[str, Any], project_short: str | None) -> bool:
     if project_short in _DFI_RESIDUAL_ONLY:
         return rd == "R0"
     ms = _extract_margin_status(case)
-    return (
-        rd == "R0"
-        or ms == "Uninvolved"
-        or _has_disease_free_outcome(case)
-    )
+    return rd == "R0" or ms == "Uninvolved" or _has_disease_free_outcome(case)
 
 
 # ---------------------------------------------------------------------------
@@ -505,9 +501,7 @@ def derive_pfi(case: dict[str, Any]) -> tuple[int | None, float | None]:
     if vital == "Dead":
         tumor_status = _extract_tumor_status(case)
         cause_of_death = demo.get("cause_of_death")
-        died_with_cancer = (
-            tumor_status == "WITH TUMOR" or cause_of_death == "Cancer Related"
-        )
+        died_with_cancer = tumor_status == "WITH TUMOR" or cause_of_death == "Cancer Related"
         if died_with_cancer and death_days is not None:
             return (1, float(death_days))
         # Dead but tumor-free / unrelated cause -> censored at death (or last contact).
@@ -522,9 +516,7 @@ def derive_pfi(case: dict[str, Any]) -> tuple[int | None, float | None]:
     return (0, float(last_contact))
 
 
-def derive_dfi(
-    case: dict[str, Any], project_id: str | None
-) -> tuple[int | None, float | None]:
+def derive_dfi(case: dict[str, Any], project_id: str | None) -> tuple[int | None, float | None]:
     """Liu's DFI: any new tumor event, restricted to patients who started disease-free.
 
     Returns (None, None) when DFI is undefined for this patient — three reasons:
@@ -550,9 +542,7 @@ def derive_dfi(
     if vital == "Dead" and new_tumor_days is None:
         tumor_status = _extract_tumor_status(case)
         cause_of_death = demo.get("cause_of_death")
-        died_with_cancer = (
-            tumor_status == "WITH TUMOR" or cause_of_death == "Cancer Related"
-        )
+        died_with_cancer = tumor_status == "WITH TUMOR" or cause_of_death == "Cancer Related"
         if died_with_cancer:
             return (None, None)
 

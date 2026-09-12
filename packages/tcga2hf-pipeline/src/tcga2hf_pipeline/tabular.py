@@ -534,9 +534,7 @@ def _copy_number_segment_rows(
     return rows
 
 
-def _segment_measurement_rows(
-    df: pd.DataFrame, common: dict[str, Any]
-) -> list[dict[str, Any]]:
+def _segment_measurement_rows(df: pd.DataFrame, common: dict[str, Any]) -> list[dict[str, Any]]:
     """The per-segment columns shared by both unmasked workflows."""
     return [
         {
@@ -1036,9 +1034,7 @@ def ssgsea_stats_rows(
     table_name = _schema_mod.ssgsea_scores_table(collection)
     frames: dict[str, pd.DataFrame] = {}
     for path in sorted(processed_dir.glob(f"*/{table_name}/data.parquet")):
-        df = pq.read_table(
-            path, columns=["pathway", "sample_type", "score_raw"]
-        ).to_pandas()
+        df = pq.read_table(path, columns=["pathway", "sample_type", "score_raw"]).to_pandas()
         if len(df):
             frames[path.parent.parent.name] = df
     if not frames:
@@ -1237,30 +1233,26 @@ def build_tables(
         "files": lambda: _files_rows(project_raw_dir),
         "survival_derived": list,
         "pathology_report": lambda: _pathology_report_rows(cases, project_raw_dir),
-        "allele_specific_copy_number_segment": lambda: (
-            _allele_specific_copy_number_segment_rows(cases, project_raw_dir)
+        "allele_specific_copy_number_segment": lambda: _allele_specific_copy_number_segment_rows(
+            cases, project_raw_dir
         ),
-        "masked_copy_number_segment": lambda: (
-            _masked_copy_number_segment_rows(cases, project_raw_dir)
+        "masked_copy_number_segment": lambda: _masked_copy_number_segment_rows(
+            cases, project_raw_dir
         ),
         "copy_number_segment": lambda: _copy_number_segment_rows(cases, project_raw_dir),
         # Yields Arrow batches rather than dicts; see the emitter's docstring.
-        "gene_level_copy_number": lambda: _gene_level_copy_number_batches(
-            cases, project_raw_dir
-        ),
+        "gene_level_copy_number": lambda: _gene_level_copy_number_batches(cases, project_raw_dir),
         "gene_model": lambda: _gene_model_rows(project_raw_dir),
         # Yields Arrow batches rather than dicts; see the emitter's docstring.
-        "methylation_beta_value": lambda: _methylation_beta_value_batches(
+        "methylation_beta_value": lambda: _methylation_beta_value_batches(cases, project_raw_dir),
+        "isoform_expression_quantification": lambda: _isoform_expression_quantification_rows(
             cases, project_raw_dir
         ),
-        "isoform_expression_quantification": lambda: (
-            _isoform_expression_quantification_rows(cases, project_raw_dir)
+        "mirna_expression_quantification": lambda: _mirna_expression_quantification_rows(
+            cases, project_raw_dir
         ),
-        "mirna_expression_quantification": lambda: (
-            _mirna_expression_quantification_rows(cases, project_raw_dir)
-        ),
-        "protein_expression_quantification": lambda: (
-            _protein_expression_quantification_rows(cases, project_raw_dir)
+        "protein_expression_quantification": lambda: _protein_expression_quantification_rows(
+            cases, project_raw_dir
         ),
     }
     # ssGSEA scores are per-project pure; the matching stats tables are a
@@ -1276,8 +1268,8 @@ def build_tables(
         return _matrix_cache[0]
 
     for coll in SSGSEA_COLLECTIONS:
-        thunks[_schema_mod.ssgsea_scores_table(coll)] = (
-            lambda c=coll: _ssgsea_scores_rows(cases, project_raw_dir, c, msigdb, _matrix)
+        thunks[_schema_mod.ssgsea_scores_table(coll)] = lambda c=coll: _ssgsea_scores_rows(
+            cases, project_raw_dir, c, msigdb, _matrix
         )
         thunks[_schema_mod.ssgsea_stats_table(coll)] = list
 
@@ -1323,10 +1315,19 @@ def derived_survival_rows(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in cases:
         sd = r.get("survival_derived") or {}
-        if all(sd.get(k) is None for k in (
-            "os_event", "os_time", "dss_event", "dss_time",
-            "pfi_event", "pfi_time", "dfi_event", "dfi_time",
-        )):
+        if all(
+            sd.get(k) is None
+            for k in (
+                "os_event",
+                "os_time",
+                "dss_event",
+                "dss_time",
+                "pfi_event",
+                "pfi_time",
+                "dfi_event",
+                "dfi_time",
+            )
+        ):
             continue
         out.append({"case_submitter_id": r["case_submitter_id"], **sd})
     return out
@@ -1425,9 +1426,7 @@ def write_tables(
             # materialise as Python dicts (see
             # `_gene_level_copy_number_batches`). Written incrementally so
             # peak memory stays at one batch.
-            n_written = _write_batches(
-                rows, out_path, TABULAR_TABLES[table_name], row_group_size
-            )
+            n_written = _write_batches(rows, out_path, TABULAR_TABLES[table_name], row_group_size)
             if n_written is not None:
                 out_paths[table_name] = out_path
                 if counts is not None:

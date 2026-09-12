@@ -83,8 +83,7 @@ COLLECTIONS: dict[str, Collection] = {
         stem="c6.all",
         md5="aba0e2214ff63327ae3fb0ce4bcd11c2",
         description=(
-            "MSigDB C6 — 189 oncogenic signatures "
-            "(oncogene / tumour-suppressor perturbation)"
+            "MSigDB C6 — 189 oncogenic signatures (oncogene / tumour-suppressor perturbation)"
         ),
     ),
     "cancer_cell_atlas": Collection(
@@ -92,8 +91,7 @@ COLLECTIONS: dict[str, Collection] = {
         stem="c4.3ca",
         md5="ff9902288655ff2ab88fcb5cbc4a95dd",
         description=(
-            "MSigDB C4:3CA — 148 Curated Cancer Cell Atlas meta-programs "
-            "(single-cell derived)"
+            "MSigDB C4:3CA — 148 Curated Cancer Cell Atlas meta-programs (single-cell derived)"
         ),
     ),
     # Fetchable and pinned, but deliberately not in SSGSEA_COLLECTIONS: its

@@ -30,7 +30,6 @@ import json
 from pathlib import Path
 
 import pandas as pd
-
 from tcga2hf_pipeline import cdr, clinical, clinical_supplement, survival
 
 HERE = Path(__file__).parent
@@ -54,14 +53,31 @@ _STAGE_FIELDS = (
 # each row; we unpack them into flat columns at slim-DataFrame build time
 # so section scripts can pandas-filter on `os_event` etc. directly.
 _TOP_LEVEL_COLS = [
-    "case_submitter_id", "project_id", "primary_site", "disease_type",
-    "cdr_matched", "cdr_redaction",
-    "cdr_OS", "cdr_OS_time", "cdr_DSS", "cdr_DSS_time",
-    "cdr_PFI", "cdr_PFI_time", "cdr_DFI", "cdr_DFI_time", "cdr_survival_complete",
+    "case_submitter_id",
+    "project_id",
+    "primary_site",
+    "disease_type",
+    "cdr_matched",
+    "cdr_redaction",
+    "cdr_OS",
+    "cdr_OS_time",
+    "cdr_DSS",
+    "cdr_DSS_time",
+    "cdr_PFI",
+    "cdr_PFI_time",
+    "cdr_DFI",
+    "cdr_DFI_time",
+    "cdr_survival_complete",
 ]
 _DERIVED_SURVIVAL_COLS = [
-    "os_event", "os_time", "dss_event", "dss_time",
-    "pfi_event", "pfi_time", "dfi_event", "dfi_time",
+    "os_event",
+    "os_time",
+    "dss_event",
+    "dss_time",
+    "pfi_event",
+    "pfi_time",
+    "dfi_event",
+    "dfi_time",
 ]
 
 
@@ -104,20 +120,22 @@ def build_cohort(raw: Path) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
     df = pd.DataFrame([_slim_row(r) for r in all_rows])
     df["project"] = df["project_id"].str.replace("TCGA-", "", regex=False)
 
-    demo = pd.DataFrame([
-        {
-            "case_submitter_id": r["case_submitter_id"],
-            "project": r["project_id"].replace("TCGA-", ""),
-            "vital_status": (r.get("demographic") or {}).get("vital_status"),
-            "days_to_birth": (r.get("demographic") or {}).get("days_to_birth"),
-            "sex_at_birth": (r.get("demographic") or {}).get("sex_at_birth"),
-            "race": (r.get("demographic") or {}).get("race"),
-            "ajcc_stage": (survival._primary_diagnosis(r) or {}).get("ajcc_pathologic_stage"),
-            "tumor_grade": (survival._primary_diagnosis(r) or {}).get("tumor_grade"),
-            "stage_raw": _resolve_stage(r),
-        }
-        for r in all_rows
-    ])
+    demo = pd.DataFrame(
+        [
+            {
+                "case_submitter_id": r["case_submitter_id"],
+                "project": r["project_id"].replace("TCGA-", ""),
+                "vital_status": (r.get("demographic") or {}).get("vital_status"),
+                "days_to_birth": (r.get("demographic") or {}).get("days_to_birth"),
+                "sex_at_birth": (r.get("demographic") or {}).get("sex_at_birth"),
+                "race": (r.get("demographic") or {}).get("race"),
+                "ajcc_stage": (survival._primary_diagnosis(r) or {}).get("ajcc_pathologic_stage"),
+                "tumor_grade": (survival._primary_diagnosis(r) or {}).get("tumor_grade"),
+                "stage_raw": _resolve_stage(r),
+            }
+            for r in all_rows
+        ]
+    )
 
     return df, demo, all_rows
 

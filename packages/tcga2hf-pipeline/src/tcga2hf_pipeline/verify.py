@@ -67,10 +67,7 @@ def _gdc_open_file_counts(client: GDCClient, project: str) -> dict[str, int]:
         "format": "JSON",
     }
     data = client._post("/files", payload)["data"]
-    return {
-        b["key"]: b["doc_count"]
-        for b in data["aggregations"]["data_type"]["buckets"]
-    }
+    return {b["key"]: b["doc_count"] for b in data["aggregations"]["data_type"]["buckets"]}
 
 
 def _our_files(processed_project_dir: Path) -> list[dict[str, Any]]:
