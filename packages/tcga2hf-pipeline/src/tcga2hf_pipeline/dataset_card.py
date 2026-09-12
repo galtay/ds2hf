@@ -1637,7 +1637,13 @@ adata = ad.AnnData(X=X, obs=obs, var=var)
 
 ## Notes on the data
 
+The examples below continue from the `adata` assembled above.
+
 **Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` supports restriction by biotype where an analysis calls for it.
+
+```python
+adata[:, adata.var.gene_type == "protein_coding"]
+```
 
 **Strandedness.** Three count columns are published — `unstranded`, `stranded_first` and `stranded_second`. GDC resolves the choice between them at the pipeline level:
 
@@ -1647,11 +1653,33 @@ adata = ad.AnnData(X=X, obs=obs, var=var)
 
 The normalized quantifications therefore exist only in `*_unstranded` form. All three count columns are published as GDC distributes them, and `samples.strand_balance` — `stranded_first / (stranded_first + stranded_second)` over the library — is provided for anyone wishing to examine the underlying protocol.
 
+```python
+adata[adata.obs.strand_balance.between(0.4, 0.6)]   # libraries that are not strand-specific
+```
+
 **Repeated sampling.** A case may contribute more than one aliquot, so samples are not independent within a patient. `case_submitter_id` appears on every value config.
+
+```python
+adata.obs.case_submitter_id.value_counts().gt(1).sum()   # cases contributing more than one
+```
 
 **Sample types.** Primary tumours, solid tissue normals, metastatic and recurrent samples are all present, distinguished by `sample_type` ([Sample Type codes][gdc-sample-types]).
 
+```python
+adata.obs.sample_type.value_counts()
+```
+
 **Library composition.** Each sample carries STAR's four unassigned-read tallies — `n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous` — which together with the gene counts account for every read in the library. The proportion assigned to genes varies from roughly 25% to 81% across the cohort and covaries with project.
+
+The proportion is computed from a count column. TPM and FPKM are normalized per library — `tpm_unstranded` sums to 1e6 for every sample — so they cannot express it.
+
+```python
+counts = load_dataset(REPO, "unstranded", split="train").with_format("numpy")
+assigned = np.stack(counts["values"]).sum(axis=1)
+unassigned = adata.obs[["n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"]].sum(axis=1)
+
+fraction = assigned / (assigned + unassigned.to_numpy())
+```
 
 """,
             # Joined rather than concatenated, as the other cards are. Each
