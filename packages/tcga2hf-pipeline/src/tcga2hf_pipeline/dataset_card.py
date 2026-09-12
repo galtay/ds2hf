@@ -1781,6 +1781,12 @@ input leaves scores unchanged — there is no reason to log-transform first.
 """
 
 
+# pyarrow stringifies float32 as "float" and float64 as "double". Printed in
+# a table beside `int32` that reads as ambiguous, and a reader who assumes
+# "float" means double gets the precision wrong. Name the width explicitly.
+_ARROW_DTYPE_LABELS = {"float": "float32", "double": "float64", "halffloat": "float16"}
+
+
 def write_expression_card(
     out_dir: Path,
     counts: dict[str, int],
@@ -1811,7 +1817,6 @@ def write_expression_card(
     bal = strand.get("balance_median", float("nan"))
     bal01 = strand.get("balance_p01", float("nan"))
     bal99 = strand.get("balance_p99", float("nan"))
-    ratio = strand.get("sum_over_unstranded_median", float("nan"))
     pct_ss = 100 * n_ss / n_strand if n_strand else 0.0
     n_clean = int(strand.get("n_projects_clean", 0))
     _outliers = strand.get("outlier_projects") or []
@@ -1843,7 +1848,8 @@ def write_expression_card(
         return f"{path.stat().st_size / 1e6:,.0f} MB" if path.exists() else "—"
 
     quant_rows = "\n".join(
-        f"| `{name}` | `{dtype}` | {_mb(name)} |" for name, dtype in QUANTIFICATIONS.items()
+        f"| `{name}` | `{_ARROW_DTYPE_LABELS.get(str(dtype), str(dtype))}` | {_mb(name)} |"
+        for name, dtype in QUANTIFICATIONS.items()
     )
 
     frontmatter = f"""---
@@ -1930,21 +1936,11 @@ X = np.stack(pq.read_table("tpm_unstranded/data.parquet", columns=["values"])
 adata = ad.AnnData(X=X, obs=obs, var=var)
 ```
 
-Parquet is the only format shipped. Against a gzip `.h5ad` of the same
-matrix it is the same size, ~6x faster to read whole, and ~50x faster to
-pull a minibatch, so a second artifact would cost sync risk and buy
-nothing.
-
 ## Choices worth knowing
 
 **No gene selection.** All {n_genes:,} GENCODE v36 features ship. `gene_type`
 on `genes` makes restricting to the 19,962 protein-coding ones a one-line
-mask — your choice, not ours.
-
-**Narrower dtypes, verified lossless.** Counts are `int32` (largest value
-observed across TCGA is 4.5M, against int32's 2.1B). Normalized values are
-`float32`, whose round-trip error is 6e-8 while GDC prints at most four
-decimal places. No published digit is lost.
+mask.
 
 **Use `unstranded` unless you have checked `strand_balance`.** STAR emits
 three count columns because the aligner cannot know the library protocol:
@@ -1976,15 +1972,12 @@ s = load_dataset("{repo_id}", "samples", split="train").to_pandas()
 unstranded_only = s[s.strand_balance.between(0.4, 0.6)]   # the usual cohort
 ```
 
-`unstranded` counts remain valid for every sample regardless of protocol —
+`unstranded` counts are valid for every sample regardless of protocol —
 counting reads without regard to strand is never wrong, only less able to
-separate overlapping antisense genes — which is why it, and the TPM/FPKM
-derived from it, stay the right default for cohort-wide comparisons. The
-stranded columns are worth reaching for when you are working inside one of
-the projects below and want the extra specificity. (`first + second` sums to
-slightly more than `unstranded`, median {ratio:.3f}x, because stranded
-counting rescues reads that unstranded counting discards as ambiguous
-between overlapping genes on opposite strands.)
+separate overlapping antisense genes — so it, and the TPM/FPKM derived from
+it, are the right default for cohort-wide comparisons. Reach for the
+stranded columns when you are working inside one of the projects above and
+want that extra specificity.
 
 **Split by patient, not by sample.** Some cases contribute more than one
 aliquot, so a random split over rows will put the same patient in train and
@@ -2007,11 +2000,11 @@ unassigned = s[["n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"]].s
 ```
 
 It ranges from roughly 25% to 81% across TCGA and **tracks the project** —
-TCGA-LAML sits near 40%, TCGA-CHOL near 77%. That is a confounder for any
-model trained across cancer types, so it is shipped as a column you can
-condition on rather than something to discover later. The tallies stay on
-the sample and off the matrix, which is why every `values` list is exactly
-{n_genes:,} long and needs no masking.
+TCGA-LAML sits near 40%, TCGA-CHOL near 77% — so it is a confounder for any
+model trained across cancer types.
+
+The tallies live on the sample rather than in the matrix, so every `values`
+list is exactly {n_genes:,} long and needs no masking.
 
 """
         + _GDC_REFERENCES

@@ -245,11 +245,10 @@ def test_build_needs_a_built_project(tmp_path: Path) -> None:
 
 def test_strand_summary_flags_an_unstranded_library() -> None:
     """A 50/50 split is the signature of a non-strand-specific protocol."""
-    unstranded = np.array([1000.0, 2000.0])
     first = np.array([500.0, 1010.0])
     second = np.array([500.0, 990.0])
 
-    stats = ed.strand_summary(unstranded, first, second)
+    stats = ed.strand_summary(first, second)
     assert stats["n_samples"] == 2
     assert stats["balance_median"] == pytest.approx(0.5, abs=0.01)
     assert stats["n_strand_specific"] == 0
@@ -257,27 +256,21 @@ def test_strand_summary_flags_an_unstranded_library() -> None:
 
 def test_strand_summary_flags_a_stranded_library() -> None:
     """A genuinely stranded library puts nearly every read on one side."""
-    stats = ed.strand_summary(
-        np.array([1000.0, 1000.0]),
-        np.array([980.0, 20.0]),
-        np.array([20.0, 980.0]),
-    )
+    stats = ed.strand_summary(np.array([980.0, 20.0]), np.array([20.0, 980.0]))
     assert stats["n_strand_specific"] == 2
 
 
 def test_strand_summary_survives_an_empty_library() -> None:
     """A sample with no reads must not produce a divide-by-zero NaN."""
-    stats = ed.strand_summary(
-        np.array([0.0, 1000.0]), np.array([0.0, 500.0]), np.array([0.0, 500.0])
-    )
+    stats = ed.strand_summary(np.array([0.0, 500.0]), np.array([0.0, 500.0]))
     assert stats["n_samples"] == 1
     assert stats["balance_median"] == pytest.approx(0.5)
 
 
-def test_strand_summary_reports_where_outliers_are() -> None:
-    """Per-project counts, because strand-specific libraries cluster."""
-    _ = ed.strand_summary(np.array([1000.0]), np.array([980.0]), np.array([20.0]))
-    assert _["n_strand_specific"] == 1
+def test_strand_summary_counts_a_single_outlier() -> None:
+    """One lopsided library is one strand-specific sample."""
+    stats = ed.strand_summary(np.array([980.0]), np.array([20.0]))
+    assert stats["n_strand_specific"] == 1
 
 
 def test_build_reports_projects_in_the_strand_breakdown(tmp_path: Path) -> None:

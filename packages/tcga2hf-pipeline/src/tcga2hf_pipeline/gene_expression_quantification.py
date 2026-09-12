@@ -299,11 +299,7 @@ def _project_block(
     return rows, blocks
 
 
-def strand_summary(
-    unstranded: np.ndarray,
-    first: np.ndarray,
-    second: np.ndarray,
-) -> dict[str, float]:
+def strand_summary(first: np.ndarray, second: np.ndarray) -> dict[str, float]:
     """Whether the cohort's libraries are strand-specific, measured.
 
     STAR emits three count columns because it cannot know the library
@@ -320,14 +316,11 @@ def strand_summary(
     both = first + second
     balance = np.divide(first, both, out=np.full_like(first, np.nan), where=both > 0)
     balance = balance[np.isfinite(balance)]
-    ratio = np.divide(both, unstranded, out=np.full_like(both, np.nan), where=unstranded > 0)
-    ratio = ratio[np.isfinite(ratio)]
     return {
         "n_samples": int(balance.size),
         "balance_median": float(np.median(balance)) if balance.size else float("nan"),
         "balance_p01": float(np.percentile(balance, 1)) if balance.size else float("nan"),
         "balance_p99": float(np.percentile(balance, 99)) if balance.size else float("nan"),
-        "sum_over_unstranded_median": float(np.median(ratio)) if ratio.size else float("nan"),
         # Samples whose balance leaves the band an unstranded library sits in.
         "n_strand_specific": int(((balance < 0.4) | (balance > 0.6)).sum()),
     }
@@ -379,7 +372,7 @@ def build(
         writers[name] = pq.ParquetWriter(path, schema, compression="zstd", write_page_index=True)
 
     sample_rows: list[dict[str, Any]] = []
-    strand_totals: dict[str, list[np.ndarray]] = {"unstranded": [], "first": [], "second": []}
+    strand_totals: dict[str, list[np.ndarray]] = {"first": [], "second": []}
     try:
         for project_dir in dirs:
             project_id = project_dir.name
@@ -426,7 +419,6 @@ def build(
                 writers[name].write_table(table, row_group_size=ROW_GROUP_SIZE)
             # Per-sample library totals, kept while the matrices are here.
             # Three float64 scalars a sample; the arrays are freed below.
-            strand_totals["unstranded"].append(blocks["unstranded"].sum(axis=1, dtype=np.float64))
             strand_totals["first"].append(blocks["stranded_first"].sum(axis=1, dtype=np.float64))
             strand_totals["second"].append(blocks["stranded_second"].sum(axis=1, dtype=np.float64))
             del blocks
@@ -443,7 +435,7 @@ def build(
         row["strand_balance"] = None if not np.isfinite(balance) else float(balance)
 
     counts = {name: len(sample_rows) for name in QUANTIFICATIONS}
-    stats = strand_summary(np.concatenate(strand_totals["unstranded"]), all_first, all_second)
+    stats = strand_summary(all_first, all_second)
 
     # Where the strand-specific libraries actually are. They cluster rather
     # than scatter — one project can be more than half of them — so a
