@@ -19,7 +19,7 @@ from tcga2hf_pipeline import (
     copy_number,
     dataset_card,
     expression,
-    expression_dataset,
+    gene_expression_quantification,
     genomic,
     hf_upload,
     mirna,
@@ -481,9 +481,7 @@ def fetch_methylation_cmd(
     Not fetched: `Masked Intensities`, the raw two-channel IDATs these betas
     are computed from (25,054 files pan-TCGA, binary).
     """
-    _fetch_modality(
-        project, data_dir, "Methylation Beta Value", "methylation", max_files=max_files
-    )
+    _fetch_modality(project, data_dir, "Methylation Beta Value", "methylation", max_files=max_files)
 
 
 @app.command("fetch-mirna-isoform")
@@ -665,9 +663,7 @@ def fetch_bcr_xml_cmd(
         ),
     ):
         typer.echo(f"--- {label} ({fmt}) ---")
-        _fetch_modality(
-            project, data_dir, dtype, out, max_files=max_files, data_format=fmt
-        )
+        _fetch_modality(project, data_dir, dtype, out, max_files=max_files, data_format=fmt)
 
 
 @app.command("fetch-clinical-supplements")
@@ -1556,9 +1552,7 @@ def upload_project_tabular_cmd(
         typer.echo("skipping verification (--skip-verify)")
     else:
         typer.echo("\nverifying against the GDC before publishing ...")
-        checks = verify.verify_project(
-            project, root / "raw", root / "processed_project_tabular"
-        )
+        checks = verify.verify_project(project, root / "raw", root / "processed_project_tabular")
         for check in checks:
             typer.echo(f"  [{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
             if not check.passed:
@@ -1753,8 +1747,8 @@ def upload_webdataset_cmd(
     typer.echo(f"\nuploaded -> {url}")
 
 
-@app.command("build-expression")
-def build_expression_cmd(
+@app.command("build-gene-expression-quantification")
+def build_gene_expression_quantification_cmd(
     data_dir: DataDirOpt = None,
     project: Annotated[
         list[str] | None,
@@ -1763,8 +1757,8 @@ def build_expression_cmd(
 ) -> None:
     """Build the cohort-wide expression matrix dataset.
 
-    Writes `<data-dir>/processed_expression/`, the repo root for
-    `gabrielaltay/tcga-expression-open`: one row per sample, the gene axis
+    Writes `<data-dir>/processed_gene_expression_quantification/`, the repo root for
+    `gabrielaltay/tcga-gene-expression-quantification-open`: one row per sample, the gene axis
     positional, one config per GDC quantification.
 
     Reads the per-project `gene_expression_quantification` tables rather
@@ -1778,7 +1772,7 @@ def build_expression_cmd(
     """
     root = _resolve_data_dir(data_dir)
     processed_project_dir = root / "processed_project_tabular"
-    out_dir = root / "processed_expression"
+    out_dir = root / "processed_gene_expression_quantification"
     typer.echo(f"source:  {processed_project_dir}")
     typer.echo(f"output:  {out_dir}")
 
@@ -1787,7 +1781,7 @@ def build_expression_cmd(
         # row block inside an otherwise-rebuilt matrix.
         shutil.rmtree(out_dir)
 
-    counts, strand = expression_dataset.build(
+    counts, strand = gene_expression_quantification.build(
         processed_project_dir,
         root / "raw",
         out_dir,
@@ -1815,15 +1809,15 @@ def build_expression_cmd(
         out_dir, counts, projects_built, strand, gdc_release=gdc_release
     )
     typer.echo(f"\nwrote dataset card -> {card}")
-    typer.echo("upload with: tcga2hf-pipeline upload-expression")
+    typer.echo("upload with: tcga2hf-pipeline upload-gene-expression-quantification")
 
 
-@app.command("upload-expression")
-def upload_expression_cmd(
+@app.command("upload-gene-expression-quantification")
+def upload_gene_expression_quantification_cmd(
     repo_id: Annotated[
         str,
         typer.Option("--repo-id", help="HF dataset repo id."),
-    ] = "gabrielaltay/tcga-expression-open",
+    ] = "gabrielaltay/tcga-gene-expression-quantification-open",
     private: Annotated[
         bool,
         typer.Option("--private/--public", help="Upload as private, or public."),
@@ -1834,7 +1828,7 @@ def upload_expression_cmd(
     ] = None,
     data_dir: DataDirOpt = None,
 ) -> None:
-    """Push `<data-dir>/processed_expression/` to HF Hub.
+    """Push `<data-dir>/processed_gene_expression_quantification/` to HF Hub.
 
     Same discipline as `upload-project-tabular`: every push costs a full
     dataset-viewer re-index, so build as often as you like and upload once.
@@ -1843,9 +1837,11 @@ def upload_expression_cmd(
     `upload_folder` would publish them.
     """
     root = _resolve_data_dir(data_dir)
-    processed_dir = root / "processed_expression"
+    processed_dir = root / "processed_gene_expression_quantification"
     if not processed_dir.exists():
-        raise typer.BadParameter(f"{processed_dir} does not exist. Run `build-expression`.")
+        raise typer.BadParameter(
+            f"{processed_dir} does not exist. Run `build-gene-expression-quantification`."
+        )
 
     strays = [
         p.relative_to(processed_dir)

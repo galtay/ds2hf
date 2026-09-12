@@ -1034,7 +1034,7 @@ The two Parquet files at the repo root are likewise assembled, not derived.
 templates `gdc_portal_url` from `case_id`. It carries no clinical attributes
 — those stay in each sample's `case.json`. `files.parquet` is the
 concatenation of every sample's `files.jsonl` with patient context prepended,
-and templates its own `gdc_portal_url` from `file_id`. 
+and templates its own `gdc_portal_url` from `file_id`.
 
 Note what is **absent** by design: no ssGSEA scores, no re-derived survival
 endpoints, no parsed expression matrices. Those are computed products and
@@ -1317,8 +1317,7 @@ def _project_tabular_configs_yaml(project_dir: Path, tables: list[str]) -> str:
 # of the types.
 _TABLE_DESCRIPTIONS: dict[str, str] = {
     "cases": (
-        "one patient, with the GDC case tree nested "
-        "(demographic, diagnoses, follow-ups, samples)"
+        "one patient, with the GDC case tree nested (demographic, diagnoses, follow-ups, samples)"
     ),
     "survival_derived": "one patient; OS / DSS / PFI / DFI endpoints re-derived here",
     "files": "one open-access GDC file for this project, carried or not",
@@ -1799,10 +1798,10 @@ def write_expression_card(
     every per-gene file repeats, and anything not carried here is carried
     in the per-project datasets.
     """
-    from tcga2hf_pipeline.expression_dataset import QUANTIFICATIONS
+    from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    repo_id = "gabrielaltay/tcga-expression-open"
+    repo_id = "gabrielaltay/tcga-gene-expression-quantification-open"
     release = gdc_release or "unknown (status file missing)"
     n_samples = counts.get("samples", 0)
     n_genes = counts.get("genes", 0)
