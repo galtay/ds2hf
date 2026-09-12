@@ -1526,6 +1526,12 @@ Because ssGSEA weights **ranks**, any strictly monotonic transform of the input 
 _ARROW_DTYPE_LABELS = {"float": "float32", "double": "float64", "halffloat": "float16"}
 
 
+# Columns the expression card's provenance note claims are computed rather
+# than carried from a GDC record. Declared so a schema change that adds a
+# derived field fails a test instead of silently making the card wrong.
+CARD_MODULE_COMPUTED_COLUMNS = {"sample_index", "gene_index", "strand_balance"}
+
+
 def write_expression_card(
     out_dir: Path,
     counts: dict[str, int],
@@ -1638,6 +1644,10 @@ adata = ad.AnnData(X=X, obs=obs, var=var)
 ## Notes on the data
 
 The examples below continue from the `adata` assembled above.
+
+**Carried and computed.** Three columns are computed here; everything else is GDC's. `sample_index` and `gene_index` number the rows so the two axes can be addressed by position, and `strand_balance` is defined under *Strandedness* below.
+
+Everything else is carried through as GDC records it: the quantification values, the GENCODE v36 gene model, the identifiers, `sample_type`, and the four read tallies. The values are stored as `int32` for the counts and `float32` for the normalized measures — narrower than the source TSV's text, and wide enough for every digit GDC prints.
 
 **Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` supports restriction by biotype where an analysis calls for it.
 

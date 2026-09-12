@@ -496,3 +496,21 @@ def test_generated_card_has_well_formed_block_boundaries(tmp_path: Path) -> None
     assert not problems, "markdown blocks need a blank line before them:\n  " + "\n  ".join(
         problems
     )
+
+
+def test_card_names_every_computed_column() -> None:
+    """The card claims three columns are computed and the rest are GDC's.
+
+    A field added to the schema without a decision about its provenance
+    would quietly falsify that. This fails until the card is updated,
+    which is the point.
+    """
+    from tcga2hf_pipeline.dataset_card import CARD_MODULE_COMPUTED_COLUMNS
+
+    schema_fields = {f.name for f in ed.SAMPLES_FIELDS} | {f.name for f in ed.GENES_FIELDS}
+    # Anything not carried straight from a GDC record.
+    computed = {"sample_index", "gene_index", "strand_balance"}
+    assert computed <= schema_fields, "a computed column vanished from the schema"
+    assert CARD_MODULE_COMPUTED_COLUMNS == computed, (
+        "the card's provenance note and the schema disagree about what is computed"
+    )
