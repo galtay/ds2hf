@@ -1621,7 +1621,18 @@ REPO = "{repo_id}"
 ds = load_dataset(REPO, "tpm_unstranded", split="train")
 ```
 
-Each row's `values` is a list of {n_genes:,} floats in `genes` order; `np.stack` over the column gives the ({n_samples:,}, {n_genes:,}) matrix. The `samples` and `genes` configs are returned in matrix order, so they serve directly as an `AnnData`'s `obs` and `var`.
+Each row's `values` is a list of {n_genes:,} floats in `genes` order. The `samples` and `genes` configs are returned in matrix order, so they serve directly as an `AnnData`'s `obs` and `var`:
+
+```python
+import anndata as ad
+import numpy as np
+
+obs = load_dataset(REPO, "samples", split="train").to_pandas().set_index("aliquot_id")
+var = load_dataset(REPO, "genes", split="train").to_pandas().set_index("gene_id")
+X = np.stack(ds.with_format("numpy")["values"])   # ({n_samples:,}, {n_genes:,}) float32
+
+adata = ad.AnnData(X=X, obs=obs, var=var)
+```
 
 ## Notes on the data
 
