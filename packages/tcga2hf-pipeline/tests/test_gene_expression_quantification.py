@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +12,11 @@ from tcga2hf.schema import TABULAR_TABLES
 from tcga2hf_pipeline import gene_expression_quantification as ed
 
 GENES = ["ENSG00000000003.15", "ENSG00000000005.6", "ENSG00000000419.13"]
+
+STATUS = {
+    "data_release": "Data Release 46.0 - August 10, 2026",
+    "data_release_version": {"major": 46, "minor": 0, "release_date": "2026-08-10"},
+}
 
 
 def _write_project(
@@ -37,8 +42,8 @@ def _write_project(
             # A real null, as the chrM genes have — this must survive.
             "gene_type": ["protein_coding"] * (len(gene_ids) - 1) + [None],
             "chromosome": ["chr1"] * (len(gene_ids) - 1) + [None],
-            "start": [100 * i for i in range(len(gene_ids))],
-            "end": [100 * i + 50 for i in range(len(gene_ids))],
+            "start": [100 * i for i in range(len(gene_ids) - 1)] + [None],
+            "end": [100 * i + 50 for i in range(len(gene_ids) - 1)] + [None],
         }
     )
     (project_dir / "gene_model").mkdir(parents=True)
@@ -50,11 +55,11 @@ def _write_project(
             base = a_i * 100 + g_i
             rows.append(
                 {
-                    "case_id": f"case-{a_i}",
+                    "case_id": f"case-{project_id}-{a_i}",
                     "case_submitter_id": f"TCGA-XX-{a_i:04d}",
                     "aliquot_id": aliquot,
                     "aliquot_submitter_id": f"{aliquot}-sub",
-                    "source_file_id": f"file-{a_i}",
+                    "source_file_id": f"file-{project_id}-{a_i}",
                     "gene_id": gene_id,
                     "unstranded": base,
                     "stranded_first": base + 1,
@@ -72,25 +77,33 @@ def _write_project(
 
     cases = [
         {
-            "case_id": f"case-{a_i}",
+            "case_id": f"case-{project_id}-{a_i}",
             "submitter_id": f"TCGA-XX-{a_i:04d}",
             "samples": [
                 {
-                    "sample_id": f"sample-{a_i}",
+                    "sample_id": f"sample-{project_id}-{a_i}",
                     "submitter_id": f"TCGA-XX-{a_i:04d}-01A",
                     "sample_type": "Solid Tissue Normal" if a_i % 2 else "Primary Tumor",
                     "portions": [
                         {
+                            "portion_id": f"portion-{project_id}-{a_i}",
+                            "submitter_id": f"TCGA-XX-{a_i:04d}-01A-01",
                             "analytes": [
                                 {
+                                    "analyte_id": f"analyte-{project_id}-{a_i}",
+                                    # Aliquot 1's analyte barcode does not
+                                    # nest, as GDC's -12R / -11H ones do not.
+                                    "submitter_id": f"TCGA-XX-{a_i:04d}-01A-"
+                                    + ("11H" if a_i == 1 else "01R"),
+                                    "analyte_type": "RNA",
                                     "aliquots": [
                                         {
                                             "aliquot_id": aliquot,
-                                            "submitter_id": f"{aliquot}-sub",
+                                            "submitter_id": f"TCGA-XX-{a_i:04d}-01A-01R-A000-07",
                                         }
-                                    ]
+                                    ],
                                 }
-                            ]
+                            ],
                         }
                     ],
                 }
@@ -102,12 +115,12 @@ def _write_project(
     raw.mkdir(parents=True)
     (raw / "cases.json").write_text(json.dumps(cases))
 
-    # Raw STAR TSVs, needed because the N_* tallies are read from `raw/`
-    # rather than from the per-project table. Only the head is parsed, so a
-    # single gene row after the QC block is enough to exercise the early
-    # break.
+    # Raw STAR TSVs, the GDC files the per-project rows above were read
+    # from: the same values, preceded by the N_* tally block. The tallies
+    # are read from here, and verification re-reads whole rows from here.
     expr = raw / "expression"
     expr.mkdir()
+    (expr / "gdc_status.json").write_text(json.dumps(STATUS))
     manifest = []
     for a_i, aliquot in enumerate(aliquots):
         name = f"{aliquot}.rna_seq.augmented_star_gene_counts.tsv"
@@ -115,24 +128,34 @@ def _write_project(
             "gene_id\tgene_name\tgene_type\tunstranded\tstranded_first"
             "\tstranded_second\ttpm_unstranded\tfpkm_unstranded\tfpkm_uq_unstranded"
         )
-        base = (a_i + 1) * 1000
-        (expr / name).write_text(
+        tally = (a_i + 1) * 1000
+        gene_rows = "".join(
+            f"{gene_id}\tG{g_i}\t{'protein_coding' if g_i < len(gene_ids) - 1 else ''}"
+            f"\t{a_i * 100 + g_i}\t{a_i * 100 + g_i + 1}\t{a_i * 100 + g_i + 2}"
+            f"\t{a_i * 100 + g_i + 0.5}\t{a_i * 100 + g_i + 0.25}\t{a_i * 100 + g_i + 0.75}\n"
+            for g_i, gene_id in enumerate(gene_ids)
+        )
+        content = (
             "# gene-model: GENCODE v36\n"
             + header
             + "\n"
-            + f"N_unmapped\t\t\t{base}\t{base}\t{base}\t\t\t\n"
-            + f"N_multimapping\t\t\t{base + 1}\t{base + 1}\t{base + 1}\t\t\t\n"
-            + f"N_noFeature\t\t\t{base + 2}\t{base + 2}\t{base + 2}\t\t\t\n"
-            + f"N_ambiguous\t\t\t{base + 3}\t{base + 3}\t{base + 3}\t\t\t\n"
-            + f"{gene_ids[0]}\tG0\tprotein_coding\t7\t3\t4\t1.0\t0.5\t0.6\n"
-        )
+            + f"N_unmapped\t\t\t{tally}\t{tally}\t{tally}\t\t\t\n"
+            + f"N_multimapping\t\t\t{tally + 1}\t{tally + 1}\t{tally + 1}\t\t\t\n"
+            + f"N_noFeature\t\t\t{tally + 2}\t{tally + 5}\t{tally + 7}\t\t\t\n"
+            + f"N_ambiguous\t\t\t{tally + 3}\t{tally + 3}\t{tally + 3}\t\t\t\n"
+            + gene_rows
+        ).encode()
+        (expr / name).write_bytes(content)
         manifest.append(
             {
-                "file_id": f"file-{a_i}",
+                "file_id": f"file-{project_id}-{a_i}",
                 "file_name": name,
+                "md5sum": hashlib.md5(content).hexdigest(),
+                "gdc_version": "1",
+                "gdc_first_release": "32.0",
                 "cases": [
                     {
-                        "case_id": f"case-{a_i}",
+                        "case_id": f"case-{project_id}-{a_i}",
                         "samples": [
                             {"portions": [{"analytes": [{"aliquots": [{"aliquot_id": aliquot}]}]}]}
                         ],
@@ -142,9 +165,21 @@ def _write_project(
         )
     (expr / "manifest.json").write_text(json.dumps(manifest))
 
+    # A gene-level copy number TSV, the source of the `genes` coordinates.
+    # The last gene is absent, as the chrM genes are in the real files.
+    cnv = raw / "gene_level_copy_number"
+    cnv.mkdir()
+    (cnv / "one.gene_level.copy_number_variation.tsv").write_text(
+        "gene_id\tgene_name\tchromosome\tstart\tend\tcopy_number\n"
+        + "".join(
+            f"{gene_id}\tG{g_i}\tchr1\t{100 * g_i}\t{100 * g_i + 50}\t2\n"
+            for g_i, gene_id in enumerate(gene_ids[:-1])
+        )
+    )
 
-def samples_have_balance(out: Path) -> bool:
-    df = pq.read_table(out / "samples" / "data.parquet").to_pandas()
+
+def aliquots_have_balance(out: Path) -> bool:
+    df = pq.read_table(out / "aliquots" / "data.parquet").to_pandas()
     return "strand_balance" in df.columns and df.strand_balance.notna().all()
 
 
@@ -167,26 +202,31 @@ def test_gene_axis_keeps_order_and_nulls(tmp_path: Path) -> None:
 
 
 def test_build_aligns_axes_positionally(tmp_path: Path) -> None:
-    """genes[i] <-> values[i], and samples[j] <-> row j, across projects."""
+    """genes[i] <-> values[i], and aliquots[j] <-> row j, across projects."""
     _write_project(tmp_path, "TCGA-AA", ["al-a0", "al-a1"])
     _write_project(tmp_path, "TCGA-BB", ["al-b0"])
     out = tmp_path / "processed_gene_expression_quantification"
 
     counts, strand = ed.build(tmp_path / "processed_project_tabular", tmp_path / "raw", out)
-    assert counts["samples"] == 3
+    assert counts["aliquots"] == 3
     assert counts["genes"] == len(GENES)
     assert counts["tpm_unstranded"] == 3
     assert strand["n_samples"] == 3
-    # Every sample carries its own measured balance, not just a cohort stat.
-    assert samples_have_balance(out)
+    # Every aliquot carries its own measured balance, not just a cohort stat.
+    assert aliquots_have_balance(out)
 
-    samples = pq.read_table(out / "samples" / "data.parquet").to_pandas()
-    # Projects are visited in sorted order, so sample_index is 0..n-1 with
+    aliquots = pq.read_table(out / "aliquots" / "data.parquet").to_pandas()
+    # Projects are visited in sorted order, so aliquot_index is 0..n-1 with
     # TCGA-AA's two aliquots first.
-    assert samples.sample_index.tolist() == [0, 1, 2]
-    assert samples.project_id.tolist() == ["TCGA-AA", "TCGA-AA", "TCGA-BB"]
-    assert samples.aliquot_id.tolist() == ["al-a0", "al-a1", "al-b0"]
-    assert samples.sample_type.tolist() == [
+    assert aliquots.aliquot_index.tolist() == [0, 1, 2]
+    assert aliquots.project_id.tolist() == ["TCGA-AA", "TCGA-AA", "TCGA-BB"]
+    assert aliquots.aliquot_id.tolist() == ["al-a0", "al-a1", "al-b0"]
+    assert aliquots.sample_id.tolist() == [
+        "sample-TCGA-AA-0",
+        "sample-TCGA-AA-1",
+        "sample-TCGA-BB-0",
+    ]
+    assert aliquots.sample_type.tolist() == [
         "Primary Tumor",
         "Solid Tissue Normal",
         "Primary Tumor",
@@ -214,10 +254,10 @@ def test_build_aligns_axes_positionally(tmp_path: Path) -> None:
             ]
         )
         np.testing.assert_allclose(matrix, expected, rtol=1e-6)
-        # The inline label columns must agree with the `samples` config,
+        # The inline label columns must agree with the `aliquots` config,
         # since a training loop trusts them instead of joining.
-        assert table.column("sample_index").to_pylist() == [0, 1, 2]
-        assert table.column("aliquot_id").to_pylist() == samples.aliquot_id.tolist()
+        assert table.column("aliquot_index").to_pylist() == [0, 1, 2]
+        assert table.column("aliquot_id").to_pylist() == aliquots.aliquot_id.tolist()
 
 
 def test_build_rejects_a_divergent_gene_model(tmp_path: Path) -> None:
@@ -291,7 +331,8 @@ def test_qc_tallies_read_only_the_head(tmp_path: Path) -> None:
 def test_qc_tallies_are_null_without_raw_files(tmp_path: Path) -> None:
     """A missing library is not a library of zero unmapped reads."""
     _write_project(tmp_path, "TCGA-AA", ["al-a0"])
-    shutil.rmtree(tmp_path / "raw" / "TCGA-AA" / "expression")
+    for tsv in (tmp_path / "raw" / "TCGA-AA" / "expression").glob("*.tsv"):
+        tsv.unlink()
 
     _, _ = ed.build(
         tmp_path / "processed_project_tabular",
@@ -299,7 +340,7 @@ def test_qc_tallies_are_null_without_raw_files(tmp_path: Path) -> None:
         tmp_path / "processed_gene_expression_quantification",
     )
     df = pq.read_table(
-        tmp_path / "processed_gene_expression_quantification" / "samples" / "data.parquet"
+        tmp_path / "processed_gene_expression_quantification" / "aliquots" / "data.parquet"
     ).to_pandas()
     assert df.n_unmapped.isna().all()
 
@@ -310,7 +351,7 @@ def test_build_carries_the_qc_tallies(tmp_path: Path) -> None:
     out = tmp_path / "processed_gene_expression_quantification"
 
     ed.build(tmp_path / "processed_project_tabular", tmp_path / "raw", out)
-    df = pq.read_table(out / "samples" / "data.parquet").to_pandas()
+    df = pq.read_table(out / "aliquots" / "data.parquet").to_pandas()
     assert df.n_unmapped.tolist() == [1000, 2000, 1000]
     assert df.n_ambiguous.tolist() == [1003, 2003, 1003]
 
@@ -369,11 +410,10 @@ def test_axis_alignment_catches_a_reordered_config(tmp_path: Path) -> None:
 
 
 def test_gene_axis_catches_a_divergent_model(tmp_path: Path) -> None:
-
     from tcga2hf_pipeline.verify import check_gene_axis
 
-    out, projects = _built(tmp_path)
-    assert check_gene_axis(out, projects).passed
+    out, _ = _built(tmp_path)
+    assert check_gene_axis(out, tmp_path / "raw").passed
 
     genes = out / "genes" / "data.parquet"
     table = pq.read_table(genes)
@@ -383,17 +423,16 @@ def test_gene_axis_catches_a_divergent_model(tmp_path: Path) -> None:
         pa.array(list(reversed(table.column("gene_id").to_pylist()))),
     )
     pq.write_table(swapped, genes)
-    assert not check_gene_axis(out, projects).passed
+    assert not check_gene_axis(out, tmp_path / "raw").passed
 
 
-def test_sample_metadata_catches_a_null_label(tmp_path: Path) -> None:
-
-    from tcga2hf_pipeline.verify import check_sample_metadata
+def test_aliquot_metadata_catches_a_null_label(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_aliquot_metadata
 
     out, _ = _built(tmp_path)
-    assert check_sample_metadata(out).passed
+    assert check_aliquot_metadata(out).passed
 
-    path = out / "samples" / "data.parquet"
+    path = out / "aliquots" / "data.parquet"
     table = pq.read_table(path)
     nulled = table.set_column(
         table.schema.get_field_index("sample_type"),
@@ -402,22 +441,27 @@ def test_sample_metadata_catches_a_null_label(tmp_path: Path) -> None:
     )
     pq.write_table(nulled, path)
 
-    check = check_sample_metadata(out)
+    check = check_aliquot_metadata(out)
     assert not check.passed
     assert any("sample_type" in d for d in check.details)
 
 
-def test_expression_values_catches_a_corrupted_cell(tmp_path: Path) -> None:
+def test_source_bytes_passes_on_a_good_tree(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_source_bytes
 
-    from tcga2hf_pipeline.verify import check_expression_values
+    out, _ = _built(tmp_path)
+    check = check_source_bytes(out, tmp_path / "raw", per_project=5)
+    assert check.passed, check.details
 
-    out, projects = _built(tmp_path)
-    assert check_expression_values(out, projects, genes_per_sample=3).passed
 
+def test_source_bytes_catches_a_corrupted_cell(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_source_bytes
+
+    out, _ = _built(tmp_path)
     path = out / "tpm_unstranded" / "data.parquet"
     table = pq.read_table(path)
     matrix = np.stack(table.column("values").to_numpy(zero_copy_only=False))
-    matrix[0, 0] += 999.0
+    matrix[0, 0] += 1e-3  # far below the old relative tolerance, still wrong
     patched = table.set_column(
         table.schema.get_field_index("values"),
         "values",
@@ -425,9 +469,175 @@ def test_expression_values_catches_a_corrupted_cell(tmp_path: Path) -> None:
     )
     pq.write_table(patched, path)
 
-    check = check_expression_values(out, projects, genes_per_sample=3)
+    check = check_source_bytes(out, tmp_path / "raw", per_project=5)
     assert not check.passed
-    assert check.details
+    assert any("tpm_unstranded differs in 1 of" in d for d in check.details)
+
+
+def test_source_bytes_catches_a_file_that_is_not_the_one_named(tmp_path: Path) -> None:
+    """Bytes that do not hash to the row's md5 are not its source."""
+    from tcga2hf_pipeline.verify import check_source_bytes
+
+    out, _ = _built(tmp_path)
+    raw = next((tmp_path / "raw" / "TCGA-BB" / "expression").glob("*.tsv"))
+    raw.write_bytes(raw.read_bytes() + b"\n")
+
+    check = check_source_bytes(out, tmp_path / "raw", per_project=5)
+    assert not check.passed
+    assert any("md5" in d for d in check.details)
+
+
+def test_source_bytes_catches_a_wrong_tally(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_source_bytes
+
+    out, _ = _built(tmp_path)
+    path = out / "aliquots" / "data.parquet"
+    table = pq.read_table(path)
+    index = table.schema.get_field_index("n_nofeature")
+    # The stranded_first tally, which the TSV also carries, is the wrong one.
+    wrong = pa.array([1005, 2005, 1005], type=pa.int64())
+    pq.write_table(table.set_column(index, "n_nofeature", wrong), path)
+
+    check = check_source_bytes(out, tmp_path / "raw", per_project=5)
+    assert not check.passed
+    assert any("n_nofeature" in d for d in check.details)
+
+
+def test_aliquot_metadata_catches_a_url_for_another_file(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_aliquot_metadata
+
+    out, _ = _built(tmp_path)
+    path = out / "aliquots" / "data.parquet"
+    table = pq.read_table(path)
+    urls = table.column("source_file_url").to_pylist()
+    urls[0], urls[1] = urls[1], urls[0]
+    index = table.schema.get_field_index("source_file_url")
+    pq.write_table(table.set_column(index, "source_file_url", pa.array(urls)), path)
+
+    check = check_aliquot_metadata(out)
+    assert not check.passed
+    assert any("source_file_url" in d for d in check.details)
+
+
+class _FakeGDC:
+    """Answers the one `/files` query `check_gdc_current` makes."""
+
+    def __init__(self, hits: list[dict]) -> None:
+        self.hits = hits
+
+    def files(self, **_kwargs) -> list[dict]:
+        return self.hits
+
+
+def _gdc_hits(out: Path) -> list[dict]:
+    frame = pq.read_table(out / "aliquots" / "data.parquet").to_pandas()
+    return [
+        {"file_id": r.source_file_id, "md5sum": r.source_file_md5sum, "version": "1"}
+        for r in frame.itertuples()
+    ]
+
+
+def test_gdc_current_passes_when_gdc_serves_the_same_files(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_gdc_current
+
+    out, _ = _built(tmp_path)
+    assert check_gdc_current(_FakeGDC(_gdc_hits(out)), out).passed
+
+
+def test_gdc_current_reports_each_kind_of_drift(tmp_path: Path) -> None:
+    from tcga2hf_pipeline.verify import check_gdc_current
+
+    out, _ = _built(tmp_path)
+    hits = _gdc_hits(out)
+    hits[0]["md5sum"] = "0" * 32  # replaced under the same id
+    del hits[1]  # withdrawn
+    hits.append({"file_id": "new-file", "md5sum": "1" * 32, "version": "1"})  # added
+
+    check = check_gdc_current(_FakeGDC(hits), out)
+    assert not check.passed
+    assert "1 added, 1 withdrawn, 1 changed" in check.summary
+
+
+def test_build_records_each_rows_source_file(tmp_path: Path) -> None:
+    out, _ = _built(tmp_path)
+    df = pq.read_table(out / "aliquots" / "data.parquet").to_pandas()
+    assert df.source_file_id.tolist() == ["file-TCGA-AA-0", "file-TCGA-AA-1", "file-TCGA-BB-0"]
+    assert df.source_file_url.tolist() == [
+        f"https://api.gdc.cancer.gov/data/{f}" for f in df.source_file_id
+    ]
+    assert df.source_file_md5sum.str.len().eq(32).all()
+    assert df.source_file_version.eq("1").all()
+    assert df.source_file_first_release.eq("32.0").all()
+
+
+def test_build_rejects_a_row_whose_file_is_not_in_the_manifest(tmp_path: Path) -> None:
+    """A value whose source cannot be named cannot be verified."""
+    _write_project(tmp_path, "TCGA-AA", ["al-a0"])
+    manifest = tmp_path / "raw" / "TCGA-AA" / "expression" / "manifest.json"
+    manifest.write_text("[]")
+
+    with pytest.raises(ValueError, match="not in the expression manifest"):
+        ed.build(
+            tmp_path / "processed_project_tabular",
+            tmp_path / "raw",
+            tmp_path / "processed_gene_expression_quantification",
+        )
+
+
+def test_download_release_reads_the_expression_fetch(tmp_path: Path) -> None:
+    _write_project(tmp_path, "TCGA-AA", ["al-a0"])
+    # The project-level status belongs to the clinical fetch; it must not
+    # be the one reported.
+    (tmp_path / "raw" / "TCGA-AA" / "gdc_status.json").write_text(
+        json.dumps({"data_release": "Data Release 45.0"})
+    )
+    release = ed.download_release(tmp_path / "raw", ["TCGA-AA"])
+    assert release["data_release"] == STATUS["data_release"]
+
+
+def test_download_release_rejects_mixed_releases(tmp_path: Path) -> None:
+    _write_project(tmp_path, "TCGA-AA", ["al-a0"])
+    _write_project(tmp_path, "TCGA-BB", ["al-b0"])
+    status = tmp_path / "raw" / "TCGA-BB" / "expression" / "gdc_status.json"
+    status.write_text(json.dumps({**STATUS, "data_release": "Data Release 47.0"}))
+
+    with pytest.raises(ValueError, match="more than one GDC release"):
+        ed.download_release(tmp_path / "raw", ["TCGA-AA", "TCGA-BB"])
+
+
+def test_card_stands_alone(tmp_path: Path) -> None:
+    """The card links GDC and the pipeline source, never a sibling dataset."""
+    from tcga2hf_pipeline import dataset_card
+
+    out, _ = _built(tmp_path)
+    dataset_card.write_expression_card(
+        out, {"aliquots": 3, "genes": len(GENES)}, ["TCGA-AA", "TCGA-BB"], STATUS
+    )
+    text = (out / "README.md").read_text()
+    assert "huggingface.co/datasets" not in text
+    others = {
+        m
+        for m in __import__("re").findall(r"gabrielaltay/[\w-]+", text)
+        if m != "gabrielaltay/tcga-gene-expression-quantification-open"
+    }
+    assert not others, f"card names other datasets: {others}"
+    assert "-tabular-open" not in text
+
+
+def test_card_states_what_it_measured(tmp_path: Path) -> None:
+    from tcga2hf_pipeline import dataset_card
+
+    out, _ = _built(tmp_path)
+    dataset_card.write_expression_card(
+        out, {"aliquots": 3, "genes": len(GENES)}, ["TCGA-AA", "TCGA-BB"], STATUS
+    )
+    text = (out / "README.md").read_text()
+    # The header's structural counts, read off the built table.
+    assert "3 aliquots × 3 genes, from 3 patients in 2 TCGA projects" in text
+    assert "GDC Data Release 46.0 (2026-08-10)" in text
+    # Nothing that would need rechecking when the data changes.
+    assert "sha256:" not in text
+    assert "%" not in text.split("## Data dictionary")[0].replace("% ", "")
 
 
 def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
@@ -444,8 +654,8 @@ def test_generated_card_frontmatter_parses_as_yaml(tmp_path: Path) -> None:
     from tcga2hf_pipeline import dataset_card
 
     out, _ = _built(tmp_path)
-    counts = {"samples": 3, "genes": len(GENES)}
-    dataset_card.write_expression_card(out, counts, ["TCGA-AA", "TCGA-BB"], gdc_release="46.0")
+    counts = {"aliquots": 3, "genes": len(GENES)}
+    dataset_card.write_expression_card(out, counts, ["TCGA-AA", "TCGA-BB"], STATUS)
 
     text = (out / "README.md").read_text()
     assert text.startswith("---\n"), "card must open with a frontmatter delimiter"
@@ -480,7 +690,7 @@ def test_generated_card_has_well_formed_block_boundaries(tmp_path: Path) -> None
 
     out, _ = _built(tmp_path)
     dataset_card.write_expression_card(
-        out, {"samples": 3, "genes": len(GENES)}, ["TCGA-AA"], gdc_release="46.0"
+        out, {"aliquots": 3, "genes": len(GENES)}, ["TCGA-AA"], STATUS
     )
     lines = (out / "README.md").read_text().split("\n")
 
@@ -498,19 +708,63 @@ def test_generated_card_has_well_formed_block_boundaries(tmp_path: Path) -> None
     )
 
 
-def test_card_names_every_computed_column() -> None:
-    """The card claims three columns are computed and the rest are GDC's.
+def test_card_dictionary_documents_every_column() -> None:
+    """Every published column has a dictionary row, in schema order.
 
-    A field added to the schema without a decision about its provenance
-    would quietly falsify that. This fails until the card is updated,
-    which is the point.
+    A column added to the schema without a definition and a source would
+    ship undocumented; this fails until the dictionary says what it is and
+    where it comes from.
     """
-    from tcga2hf_pipeline.dataset_card import CARD_MODULE_COMPUTED_COLUMNS
+    from tcga2hf_pipeline.dataset_card import _EXPRESSION_DICTIONARY
 
-    schema_fields = {f.name for f in ed.SAMPLES_FIELDS} | {f.name for f in ed.GENES_FIELDS}
-    # Anything not carried straight from a GDC record.
-    computed = {"sample_index", "gene_index", "strand_balance"}
-    assert computed <= schema_fields, "a computed column vanished from the schema"
-    assert CARD_MODULE_COMPUTED_COLUMNS == computed, (
-        "the card's provenance note and the schema disagree about what is computed"
+    documented = {k: [row[0] for row in rows] for k, rows in _EXPRESSION_DICTIONARY.items()}
+    assert documented["aliquots"] == [f.name for f in ed.ALIQUOTS_FIELDS]
+    assert documented["genes"] == [f.name for f in ed.GENES_FIELDS]
+    assert documented["measure"] == [f.name for f in ed.INLINE_ALIQUOT_FIELDS] + ["values"]
+
+
+def test_card_dictionary_marks_exactly_the_computed_columns() -> None:
+    """The card says everything not marked computed is GDC's, verbatim."""
+    from tcga2hf_pipeline.dataset_card import (
+        _EXPRESSION_DICTIONARY,
+        CARD_MODULE_COMPUTED_COLUMNS,
     )
+
+    computed = {
+        column
+        for rows in _EXPRESSION_DICTIONARY.values()
+        for column, _, source in rows
+        if source == "computed"
+    }
+    assert computed == CARD_MODULE_COMPUTED_COLUMNS
+    assert computed == {"aliquot_index", "gene_index", "strand_balance", "source_file_url"}
+
+
+def test_card_dictionary_links_resolve_to_real_gdc_fields() -> None:
+    """Every GDC dictionary link names an entity and field that exist.
+
+    The GDC dictionary viewer is a single-page app, so a link to a missing
+    field still returns 200 and simply shows nothing. Checked instead
+    against the dictionary snapshot the fetch saves, when one is present.
+    """
+    import os
+
+    from tcga2hf_pipeline.dataset_card import _EXPRESSION_DICTIONARY, _EXPRESSION_SOURCES
+
+    root = Path(os.environ.get("TCGA2HF_DATA_DIR", Path.home() / "data" / "tcga2hf"))
+    snapshots = sorted((root / "raw").glob("gdc_dictionary.*.json"))
+    if not snapshots:
+        pytest.skip("no GDC dictionary snapshot under the data dir")
+    dictionary = json.loads(snapshots[-1].read_text())
+
+    missing = []
+    for rows in _EXPRESSION_DICTIONARY.values():
+        for column, _, source in rows:
+            if source in _EXPRESSION_SOURCES:
+                continue
+            entity, _, field = source.partition(".")
+            if entity not in dictionary or (
+                field and field not in dictionary[entity]["properties"]
+            ):
+                missing.append(f"{column} -> {source}")
+    assert not missing, f"not in {snapshots[-1].name}: {missing}"

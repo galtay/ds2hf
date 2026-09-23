@@ -1784,12 +1784,25 @@ def build_gene_expression_quantification_cmd(
     typer.echo(f"source:  {processed_project_dir}")
     typer.echo(f"output:  {out_dir}")
 
+    projects_built = sorted(
+        {
+            p.name
+            for p in processed_project_dir.glob("TCGA-*")
+            if (p / "gene_expression_quantification" / "data.parquet").exists()
+        }
+        if project is None
+        else set(project)
+    )
+    # Checked before the old tree is removed: a mixed-release tree should
+    # cost a message, not the last good build or a twenty-minute rebuild.
+    release = gene_expression_quantification.download_release(root / "raw", projects_built)
+
     if out_dir.exists():
         # A project dropped from the selection must not linger as a stale
         # row block inside an otherwise-rebuilt matrix.
         shutil.rmtree(out_dir)
 
-    counts, strand = gene_expression_quantification.build(
+    counts, stats = gene_expression_quantification.build(
         processed_project_dir,
         root / "raw",
         out_dir,
@@ -1801,21 +1814,15 @@ def build_gene_expression_quantification_cmd(
         size = (out_dir / name / "data.parquet").stat().st_size
         typer.echo(f"  {name:<24}{n:>10,} rows{size / 1e6:>10,.0f} MB")
 
-    projects_built = sorted(
-        {p.name for p in processed_project_dir.glob("TCGA-*")} if project is None else set(project)
-    )
-    status_path = root / "raw" / projects_built[0] / "gdc_status.json"
-    gdc_release = (
-        json.loads(status_path.read_text()).get("data_release") if status_path.exists() else None
-    )
     typer.echo(
-        f"\nstrand balance first/(first+second): median {strand['balance_median']:.4f} "
-        f"[{strand['balance_p01']:.3f}, {strand['balance_p99']:.3f}]; "
-        f"{strand['n_strand_specific']} of {strand['n_samples']:,} samples outside 0.4-0.6"
+        f"\nGDC release at download: {release['data_release']}"
+        f"\nstrand balance first/(first+second): median {stats['balance_median']:.4f} "
+        f"[{stats['balance_p01']:.3f}, {stats['balance_p99']:.3f}]; "
+        f"{stats['n_strand_specific']} of {stats['n_samples']:,} libraries outside 0.4-0.6"
+        f"\nreads assigned to genes: {stats['assigned_min']:.1%} - {stats['assigned_max']:.1%} "
+        f"over {stats['assigned_n']:,} libraries"
     )
-    card = dataset_card.write_expression_card(
-        out_dir, counts, projects_built, gdc_release=gdc_release
-    )
+    card = dataset_card.write_expression_card(out_dir, counts, projects_built, release=release)
     typer.echo(f"\nwrote dataset card -> {card}")
     typer.echo("upload with: tcga2hf-pipeline upload-gene-expression-quantification")
 
@@ -1823,31 +1830,37 @@ def build_gene_expression_quantification_cmd(
 @app.command("verify-gene-expression-quantification")
 def verify_gene_expression_quantification_cmd(
     data_dir: DataDirOpt = None,
-    sample: Annotated[
+    per_project: Annotated[
         int,
-        typer.Option("--sample", help="Projects to re-read cells from for the value check."),
-    ] = 4,
+        typer.Option("--per-project", help="Whole rows per project to re-read from raw GDC files."),
+    ] = 1,
+    remote: Annotated[
+        int,
+        typer.Option("--remote", help="Rows to fetch from their source_file_url. 0 skips."),
+    ] = 2,
 ) -> None:
-    """Check the built expression dataset against the tables it came from.
+    """Check the built expression dataset against the GDC files it names.
 
-    The per-project checks in `verify-project` ask whether a tree agrees
-    with the GDC. These ask a narrower question, because this dataset is a
-    reshape of trees that were already verified that way: did the reshape
-    preserve them, and does the positional contract hold?
+    First the positional contract: values are addressed by position in two
+    directions at once -- `genes[i]` to `values[i]`, and `aliquots[j]` to
+    row `j` -- so a config whose rows came out in a different order would
+    attribute one patient's expression to another and nothing downstream
+    would notice.
 
-    That contract is the reason this exists. Values are addressed by
-    position in two directions at once -- `genes[i]` to `values[i]`, and
-    `samples[j]` to row `j` -- so a config whose rows came out in a
-    different order would attribute one patient's expression to another and
-    nothing downstream would notice.
+    Then the sources: whole rows re-read from the md5-verified raw files and
+    from their published `source_file_url`, and the source file set compared
+    by id and md5 with what the GDC serves today. That last check is also
+    the one to run after a GDC release: if it passes, a rebuild would read
+    identical bytes.
 
     Exits non-zero if any check fails, so it can gate an upload.
     """
     root = _resolve_data_dir(data_dir)
     checks = verify.verify_expression(
         root / "processed_gene_expression_quantification",
-        root / "processed_project_tabular",
-        sample=sample,
+        root / "raw",
+        per_project=per_project,
+        remote=remote,
     )
     typer.echo("verifying the expression dataset\n")
     for check in checks:
@@ -1920,7 +1933,7 @@ def upload_gene_expression_quantification_cmd(
         typer.echo("skipping verification (--skip-verify)")
     else:
         typer.echo("\nverifying before publishing ...")
-        checks = verify.verify_expression(processed_dir, root / "processed_project_tabular")
+        checks = verify.verify_expression(processed_dir, root / "raw")
         for check in checks:
             typer.echo(f"  [{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
             if not check.passed:

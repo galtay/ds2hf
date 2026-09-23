@@ -348,12 +348,42 @@ def verify_project(
 # ===========================================================================
 # Expression dataset
 #
-# A different question from the per-project checks above. That tree is built
-# from raw GDC bytes, so it is checked against the GDC. This one is built
-# from those per-project tables, so the GDC is the wrong reference: what
-# matters is whether the reshape preserved them, and whether the positional
-# contract the dataset is founded on actually holds.
+# Checked against the GDC, not against the per-project tables it was
+# reshaped from, so that the dataset's claims stand on its own sources: every
+# row names a GDC file, and the checks below re-read those files -- from the
+# md5-verified bytes on disk, from `source_file_url`, and from the live API --
+# and compare them with what ships. The positional contract (genes[i] <->
+# values[i], aliquots[j] <-> row j) is checked first, because every other
+# check addresses cells by position and would be meaningless without it.
 # ===========================================================================
+
+_EXPR_ID_COLUMNS = (
+    "aliquot_id",
+    "aliquot_submitter_id",
+    "analyte_id",
+    "analyte_submitter_id",
+    "analyte_type",
+    "portion_id",
+    "portion_submitter_id",
+    "sample_id",
+    "sample_submitter_id",
+    "sample_type",
+    "case_id",
+    "case_submitter_id",
+    "project_id",
+    "source_file_id",
+    "source_file_md5sum",
+    "source_file_version",
+    "source_file_first_release",
+    "source_file_url",
+)
+_EXPR_TALLIES = {
+    "N_unmapped": "n_unmapped",
+    "N_multimapping": "n_multimapping",
+    "N_noFeature": "n_nofeature",
+    "N_ambiguous": "n_ambiguous",
+}
+_GDC_DATA_URL = "https://api.gdc.cancer.gov/data/"
 
 
 def _row_group_for(parquet_file: Any, row_index: int) -> tuple[int, int]:
@@ -373,8 +403,81 @@ def _row_group_for(parquet_file: Any, row_index: int) -> tuple[int, int]:
     raise IndexError(f"row {row_index} beyond {start} rows")
 
 
+def _row_values(processed: Path, row_index: int) -> dict[str, Any]:
+    """{quantification: numpy array} for one row, read from each value config."""
+    import numpy as np
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
+
+    out = {}
+    for name in QUANTIFICATIONS:
+        parquet_file = pq.ParquetFile(processed / name / "data.parquet")
+        group, offset = _row_group_for(parquet_file, row_index)
+        column = parquet_file.read_row_group(group, columns=["values"]).column("values")
+        out[name] = np.asarray(column[offset].values)
+    return out
+
+
+def _read_star_tsv(raw: bytes) -> tuple[Any, Any]:
+    """(tally rows, gene rows) of a GDC STAR-Counts TSV, as DataFrames."""
+    import io
+
+    import pandas as pd
+
+    frame = pd.read_csv(io.BytesIO(raw), sep="\t", comment="#")
+    is_tally = frame["gene_id"].str.startswith("N_")
+    return frame[is_tally].set_index("gene_id"), frame[~is_tally].reset_index(drop=True)
+
+
+def _compare_row_to_source(
+    raw: bytes,
+    row: dict[str, Any],
+    values: dict[str, Any],
+    gene_ids: list[str],
+) -> list[str]:
+    """Every way one published row can disagree with the file it names.
+
+    Exact comparisons throughout. The counts are integers, and the float32
+    values are compared with the TSV's text parsed and narrowed the same
+    way, so any difference at all is a real one.
+    """
+    import numpy as np
+
+    label = f"{row['project_id']} {row['aliquot_id']}"
+    digest = hashlib.md5(raw).hexdigest()
+    if digest != row["source_file_md5sum"]:
+        return [f"  {label}: md5 {digest} != {row['source_file_md5sum']}"]
+
+    tallies, genes = _read_star_tsv(raw)
+    problems = []
+    if genes["gene_id"].tolist() != gene_ids:
+        problems.append(f"  {label}: gene order differs from `genes`")
+        return problems
+
+    for name, got in values.items():
+        want = genes[name].to_numpy()
+        want = want.astype(got.dtype) if got.dtype.kind == "f" else want.astype(np.int64)
+        if not np.array_equal(got.astype(want.dtype), want):
+            n = int((got.astype(want.dtype) != want).sum())
+            problems.append(f"  {label}: {name} differs in {n:,} of {len(want):,} genes")
+
+    for tsv_name, column in _EXPR_TALLIES.items():
+        want = int(tallies.loc[tsv_name, "unstranded"])
+        if row[column] != want:
+            problems.append(f"  {label}: {column} {row[column]} != {want}")
+
+    first = float(genes["stranded_first"].sum())
+    second = float(genes["stranded_second"].sum())
+    if first + second > 0:
+        balance = first / (first + second)
+        if row["strand_balance"] is None or abs(row["strand_balance"] - balance) > 1e-6:
+            problems.append(f"  {label}: strand_balance {row['strand_balance']} != {balance}")
+    return problems
+
+
 def check_axis_alignment(processed: Path) -> Check:
-    """Every config must agree on the sample axis, in the same order.
+    """Every config must agree on the aliquot axis, in the same order.
 
     The dataset joins by position, not by key, so a config whose rows are
     ordered differently would silently attribute one patient's expression to
@@ -384,13 +487,13 @@ def check_axis_alignment(processed: Path) -> Check:
 
     from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
 
-    samples = pq.read_table(processed / "samples" / "data.parquet")
-    expected = samples.column("aliquot_id").to_pylist()
+    aliquots = pq.read_table(processed / "aliquots" / "data.parquet")
+    expected = aliquots.column("aliquot_id").to_pylist()
     n_genes = pq.ParquetFile(processed / "genes" / "data.parquet").metadata.num_rows
     details, bad = [], False
 
-    if samples.column("sample_index").to_pylist() != list(range(len(expected))):
-        details.append("  samples.sample_index is not 0..n-1")
+    if aliquots.column("aliquot_index").to_pylist() != list(range(len(expected))):
+        details.append("  aliquots.aliquot_index is not 0..n-1")
         bad = True
 
     for name in QUANTIFICATIONS:
@@ -399,12 +502,12 @@ def check_axis_alignment(processed: Path) -> Check:
             details.append(f"  {name}: missing")
             bad = True
             continue
-        table = pq.read_table(path, columns=["sample_index", "aliquot_id"])
+        table = pq.read_table(path, columns=["aliquot_index", "aliquot_id"])
         if table.column("aliquot_id").to_pylist() != expected:
-            details.append(f"  {name}: aliquot order differs from `samples`")
+            details.append(f"  {name}: aliquot order differs from `aliquots`")
             bad = True
-        if table.column("sample_index").to_pylist() != list(range(len(expected))):
-            details.append(f"  {name}: sample_index is not 0..n-1")
+        if table.column("aliquot_index").to_pylist() != list(range(len(expected))):
+            details.append(f"  {name}: aliquot_index is not 0..n-1")
             bad = True
         # One row's list length stands for the config: a short list would
         # shift every gene after it.
@@ -418,179 +521,257 @@ def check_axis_alignment(processed: Path) -> Check:
     return Check(
         "axis_alignment",
         not bad,
-        f"{len(QUANTIFICATIONS)} value configs over {len(expected):,} samples x {n_genes:,} genes",
+        f"{len(QUANTIFICATIONS)} value configs over {len(expected):,} aliquots x {n_genes:,} genes",
         details,
     )
 
 
-def check_gene_axis(processed: Path, project_tabular_dir: Path) -> Check:
-    """The gene axis must still equal the model the values were read against."""
+def check_gene_axis(processed: Path, raw_dir: Path) -> Check:
+    """`genes` must equal the model in the GDC files it was read from.
+
+    `gene_id` / `gene_name` / `gene_type` against a raw STAR TSV, and the
+    coordinates against a raw gene-level copy number TSV, the two sources
+    the card names.
+    """
+    import pandas as pd
     import pyarrow.parquet as pq
 
-    ours = pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
-    ours_ids = ours.column("gene_id").to_pylist()
+    ours = pq.read_table(processed / "genes" / "data.parquet").to_pandas()
+    star = next(iter(sorted(raw_dir.glob("TCGA-*/expression/*.tsv"))), None)
+    cnv = next(iter(sorted(raw_dir.glob("TCGA-*/gene_level_copy_number/*.tsv"))), None)
+    if star is None or cnv is None:
+        return Check("gene_axis", False, f"no raw STAR or gene-level CN TSV under {raw_dir}")
 
-    models = sorted(project_tabular_dir.glob("TCGA-*/gene_model/data.parquet"))
-    if not models:
-        return Check("gene_axis", False, f"no gene_model found under {project_tabular_dir}")
-    theirs = pq.read_table(models[0], columns=["gene_id"]).column("gene_id").to_pylist()
+    details = []
+    _, genes = _read_star_tsv(star.read_bytes())
+    if genes["gene_id"].tolist() != ours["gene_id"].tolist():
+        details.append(f"  gene_id order differs from {star.name}")
+    else:
+        for column in ("gene_name", "gene_type"):
+            want = [None if pd.isna(v) else v for v in genes[column]]
+            got = [None if pd.isna(v) else v for v in ours[column]]
+            n = sum(a != b for a, b in zip(got, want, strict=True))
+            if n:
+                details.append(f"  {column}: {n:,} genes differ from {star.name}")
 
-    if ours_ids != theirs:
-        first = next(
-            (i for i, (a, b) in enumerate(zip(ours_ids, theirs, strict=False)) if a != b),
-            min(len(ours_ids), len(theirs)),
-        )
-        return Check(
-            "gene_axis",
-            False,
-            f"differs from {models[0].parent.parent.name} at index {first}",
-            [f"  ours[{first}]={ours_ids[first : first + 1]}, theirs={theirs[first : first + 1]}"],
-        )
-    return Check("gene_axis", True, f"{len(ours_ids):,} genes match {models[0].parent.parent.name}")
-
-
-def check_sample_metadata(processed: Path) -> Check:
-    """Columns a consumer filters on must be populated and in range."""
-    import pyarrow.parquet as pq
-
-    table = pq.read_table(processed / "samples" / "data.parquet")
-    details, bad = [], False
-
-    for column in ("aliquot_id", "case_submitter_id", "project_id", "sample_type"):
-        nulls = table.column(column).null_count
-        if nulls:
-            details.append(f"  {column}: {nulls:,} null")
-            bad = True
-
-    balance = [b for b in table.column("strand_balance").to_pylist() if b is not None]
-    if not balance:
-        details.append("  strand_balance: entirely null")
-        bad = True
-    elif min(balance) < 0.0 or max(balance) > 1.0:
-        details.append(f"  strand_balance outside [0,1]: [{min(balance)}, {max(balance)}]")
-        bad = True
-
-    for column in ("n_unmapped", "n_multimapping", "n_nofeature", "n_ambiguous"):
-        values = [v for v in table.column(column).to_pylist() if v is not None]
-        if values and min(values) < 0:
-            details.append(f"  {column}: negative value {min(values)}")
-            bad = True
+    coords = pd.read_csv(cnv, sep="\t", usecols=["gene_id", "chromosome", "start", "end"])
+    merged = ours.merge(coords, on="gene_id", how="left", suffixes=("", "_cnv"))
+    for column in ("chromosome", "start", "end"):
+        present = merged[f"{column}_cnv"].notna()
+        n = int((merged.loc[present, column] != merged.loc[present, f"{column}_cnv"]).sum())
+        if n:
+            details.append(f"  {column}: {n:,} genes differ from {cnv.name}")
+        stray = int((merged[column].notna() & ~present).sum())
+        if stray:
+            details.append(f"  {column}: {stray:,} genes have a value the CN file does not")
 
     return Check(
-        "sample_metadata",
-        not bad,
-        f"{table.num_rows:,} samples, {table.num_columns} columns checked",
+        "gene_axis",
+        not details,
+        f"{len(ours):,} genes against {star.parent.parent.name} STAR + gene-level CN TSVs",
         details,
     )
 
 
-def check_expression_values(
-    processed: Path,
-    project_tabular_dir: Path,
-    projects: int = 4,
-    samples_per_project: int = 2,
-    genes_per_sample: int = 6,
-    seed: int = 0,
-) -> Check:
-    """Re-read cells from the per-project tables this was reshaped from.
+def check_aliquot_metadata(processed: Path) -> Check:
+    """Every row must be identified, unique, and name a well-formed source."""
+    import re
 
-    Sampled rather than exhaustive: a full comparison would re-read every
-    per-project expression table. The failure this guards against is a
-    systematic reshape error, which a handful of random cells will expose.
+    import pyarrow.parquet as pq
+
+    frame = pq.read_table(processed / "aliquots" / "data.parquet").to_pandas()
+    details = []
+
+    for column in _EXPR_ID_COLUMNS:
+        nulls = int(frame[column].isna().sum())
+        if nulls:
+            details.append(f"  {column}: {nulls:,} null")
+    for column in ("aliquot_id", "source_file_id"):
+        dupes = int(frame[column].duplicated().sum())
+        if dupes:
+            details.append(f"  {column}: {dupes:,} duplicated")
+
+    md5 = re.compile(r"^[0-9a-f]{32}$")
+    bad_md5 = int((~frame["source_file_md5sum"].fillna("").str.match(md5)).sum())
+    if bad_md5:
+        details.append(f"  source_file_md5sum: {bad_md5:,} not a 32-hex md5")
+    bad_url = int((frame["source_file_url"] != _GDC_DATA_URL + frame["source_file_id"]).sum())
+    if bad_url:
+        details.append(f"  source_file_url: {bad_url:,} not the data URL of source_file_id")
+
+    balance = frame["strand_balance"].dropna()
+    if balance.empty:
+        details.append("  strand_balance: entirely null")
+    elif balance.min() < 0.0 or balance.max() > 1.0:
+        details.append(f"  strand_balance outside [0,1]: [{balance.min()}, {balance.max()}]")
+    for column in _EXPR_TALLIES.values():
+        if (frame[column].dropna() < 0).any():
+            details.append(f"  {column}: negative value")
+
+    return Check(
+        "aliquot_metadata",
+        not details,
+        f"{len(frame):,} aliquots, {len(_EXPR_ID_COLUMNS)} identifier columns checked",
+        details,
+    )
+
+
+def _pick_rows(frame: Any, per_project: int, seed: int) -> Any:
+    """`per_project` random rows from every project, so no project goes unread."""
+    index = [
+        i
+        for _, group in frame.groupby("project_id")
+        for i in group.sample(min(per_project, len(group)), random_state=seed).index
+    ]
+    return frame.loc[index]
+
+
+def check_source_bytes(
+    processed: Path, raw_dir: Path, per_project: int = 1, seed: int = 0
+) -> Check:
+    """Re-read whole rows from the md5-verified GDC files on disk.
+
+    For each sampled row: the raw file it names must hash to its
+    `source_file_md5sum`, and every one of its 60,660 x 6 values, its four
+    read tallies and its `strand_balance` must equal what that file says.
     """
     import pyarrow.parquet as pq
 
-    from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
+    frame = pq.read_table(processed / "aliquots" / "data.parquet").to_pandas()
+    gene_ids = pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
+    gene_ids = gene_ids.column("gene_id").to_pylist()
 
-    rng = random.Random(seed)
-    samples = pq.read_table(processed / "samples" / "data.parquet").to_pandas()
-    gene_ids = (
-        pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
-        .column("gene_id")
-        .to_pylist()
-    )
+    names: dict[str, Path] = {}
+    for manifest in raw_dir.glob("TCGA-*/expression/manifest.json"):
+        for entry in json.loads(manifest.read_text()):
+            names[entry["file_id"]] = manifest.parent / entry["file_name"]
 
-    available = sorted(samples["project_id"].unique())
-    chosen = rng.sample(available, min(projects, len(available)))
-    mismatches, checked = [], 0
-
-    for project in chosen:
-        source = project_tabular_dir / project / "gene_expression_quantification" / "data.parquet"
-        if not source.exists():
-            mismatches.append(f"  {project}: source table missing")
+    picks = _pick_rows(frame, per_project, seed)
+    problems: list[str] = []
+    for row in picks.to_dict("records"):
+        path = names.get(row["source_file_id"])
+        if path is None or not path.exists():
+            problems.append(f"  {row['project_id']} {row['aliquot_id']}: raw file missing")
             continue
-        rows = samples[samples["project_id"] == project]
-        picks = rows.sample(min(samples_per_project, len(rows)), random_state=seed)
-        frame = pq.read_table(
-            source, columns=["aliquot_id", "gene_id", *QUANTIFICATIONS]
-        ).to_pandas()
-
-        for _, row in picks.iterrows():
-            index = int(row["sample_index"])
-            source_rows = frame[frame["aliquot_id"] == row["aliquot_id"]].set_index("gene_id")
-            for gene_index in rng.sample(range(len(gene_ids)), genes_per_sample):
-                gene_id = gene_ids[gene_index]
-                for name in QUANTIFICATIONS:
-                    parquet_file = pq.ParquetFile(processed / name / "data.parquet")
-                    group, offset = _row_group_for(parquet_file, index)
-                    values = (
-                        parquet_file.read_row_group(group, columns=["values"])
-                        .column("values")[offset]
-                        .as_py()
-                    )
-                    got, want = values[gene_index], source_rows.loc[gene_id, name]
-                    checked += 1
-                    if abs(float(got) - float(want)) > abs(float(want)) * 1e-6:
-                        mismatches.append(
-                            f"  {project} {name} sample={index} gene={gene_index}: {got} != {want}"
-                        )
+        problems += _compare_row_to_source(
+            path.read_bytes(), row, _row_values(processed, int(row["aliquot_index"])), gene_ids
+        )
 
     return Check(
-        "expression_values",
-        not mismatches,
-        f"{checked:,} cells re-read across {len(chosen)} project(s): "
-        f"{len(mismatches)} mismatch(es)",
-        mismatches[:10],
+        "source_bytes",
+        not problems,
+        f"{len(picks):,} whole rows re-read from raw GDC files across "
+        f"{picks['project_id'].nunique()} projects: {len(problems)} problem(s)",
+        problems[:10],
     )
 
 
-def check_sample_coverage(client: GDCClient, processed: Path) -> Check:
-    """Our sample count must equal the expression files the GDC serves."""
+def check_source_urls(processed: Path, n: int = 2, seed: int = 0) -> Check:
+    """Fetch rows' `source_file_url` and compare, as a consumer would.
+
+    The same comparison as `check_source_bytes`, but through the URL the
+    dataset publishes rather than a local copy, so it also proves the URL
+    serves the file the row was read from.
+    """
+    import httpx
     import pyarrow.parquet as pq
 
-    ours = pq.ParquetFile(processed / "samples" / "data.parquet").metadata.num_rows
-    # `size: 0` returns the count without the hits — one request rather than
-    # paging through 11,505 file records to measure their length.
-    payload = {
-        "filters": and_(
+    frame = pq.read_table(processed / "aliquots" / "data.parquet").to_pandas()
+    gene_ids = pq.read_table(processed / "genes" / "data.parquet", columns=["gene_id"])
+    gene_ids = gene_ids.column("gene_id").to_pylist()
+
+    picks = frame.sample(min(n, len(frame)), random_state=seed)
+    problems: list[str] = []
+    with httpx.Client(timeout=120.0, follow_redirects=True) as http:
+        for row in picks.to_dict("records"):
+            response = http.get(row["source_file_url"])
+            if response.status_code != 200:
+                problems.append(f"  {row['source_file_url']}: HTTP {response.status_code}")
+                continue
+            problems += _compare_row_to_source(
+                response.content, row, _row_values(processed, int(row["aliquot_index"])), gene_ids
+            )
+
+    return Check(
+        "source_urls",
+        not problems,
+        f"{len(picks)} row(s) fetched from source_file_url and re-read: {len(problems)} problem(s)",
+        problems[:10],
+    )
+
+
+def check_gdc_current(client: GDCClient, processed: Path) -> Check:
+    """Is the source file set still exactly what the GDC serves?
+
+    Compares by identity, not count: the set of file ids, and each file's
+    md5 and version, against a live `/files` query for the dataset's scope.
+    Then recomputes the source digest from both sides. Equal digests mean a
+    rebuild today would read identical bytes; this is the check to run after
+    a GDC release before deciding whether to rebuild.
+    """
+    import pyarrow.parquet as pq
+
+    ours = pq.read_table(
+        processed / "aliquots" / "data.parquet",
+        columns=["source_file_id", "source_file_md5sum", "source_file_version"],
+    ).to_pandas()
+    hits = client.files(
+        filters=and_(
             eq("cases.project.program.name", "TCGA"),
             eq("data_type", "Gene Expression Quantification"),
+            eq("analysis.workflow_type", "STAR - Counts"),
             eq("access", "open"),
         ),
-        "fields": "file_id",
-        "format": "JSON",
-        "size": 0,
-    }
-    theirs = client._post("/files", payload)["data"]["pagination"]["total"]
+        fields=["file_id", "md5sum", "version"],
+        page_size=500,
+    )
+    theirs = {h["file_id"]: h for h in hits}
+    mine = {r.source_file_id: r for r in ours.itertuples(index=False)}
+
+    added = sorted(set(theirs) - set(mine))
+    withdrawn = sorted(set(mine) - set(theirs))
+    changed = [
+        f
+        for f in sorted(set(mine) & set(theirs))
+        if theirs[f]["md5sum"] != mine[f].source_file_md5sum
+        or str(theirs[f].get("version")) != mine[f].source_file_version
+    ]
+
+    def digest(pairs: list[tuple[str, str]]) -> str:
+        lines = sorted(f"{f}\t{m}\n" for f, m in pairs)
+        return "sha256:" + hashlib.sha256("".join(lines).encode()).hexdigest()
+
+    ours_digest = digest([(f, r.source_file_md5sum) for f, r in mine.items()])
+    gdc_digest = digest([(f, h["md5sum"]) for f, h in theirs.items()])
+
+    details = [f"  ours {ours_digest}", f"  gdc  {gdc_digest}"]
+    details += [f"  added at GDC: {f}" for f in added[:5]]
+    details += [f"  withdrawn from GDC: {f}" for f in withdrawn[:5]]
+    details += [f"  md5 or version changed: {f}" for f in changed[:5]]
     return Check(
-        "sample_coverage",
-        ours == theirs,
-        f"{ours:,} samples ours / {theirs:,} open expression files at GDC",
+        "gdc_current",
+        ours_digest == gdc_digest and not changed,
+        f"{len(mine):,} ours / {len(theirs):,} at GDC: {len(added)} added, "
+        f"{len(withdrawn)} withdrawn, {len(changed)} changed",
+        details,
     )
 
 
 def verify_expression(
     processed_dir: Path,
-    project_tabular_dir: Path,
-    sample: int = 4,
+    raw_dir: Path,
+    per_project: int = 1,
+    remote: int = 2,
 ) -> list[Check]:
-    """Run every expression-dataset check. Local ones first, then the API."""
+    """Run every expression-dataset check. Local ones first, then the network."""
     checks = [
         check_axis_alignment(processed_dir),
-        check_gene_axis(processed_dir, project_tabular_dir),
-        check_sample_metadata(processed_dir),
-        check_expression_values(processed_dir, project_tabular_dir, projects=sample),
+        check_gene_axis(processed_dir, raw_dir),
+        check_aliquot_metadata(processed_dir),
+        check_source_bytes(processed_dir, raw_dir, per_project=per_project),
     ]
+    if remote:
+        checks.append(check_source_urls(processed_dir, n=remote))
     with GDCClient() as client:
-        checks.append(check_sample_coverage(client, processed_dir))
+        checks.append(check_gdc_current(client, processed_dir))
     return checks

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from tcga2hf_pipeline.genomic import MODALITY_FILTERS as _MODALITY_FILTERS
 
@@ -1490,14 +1491,140 @@ _ARROW_DTYPE_LABELS = {"float": "float32", "double": "float64", "halffloat": "fl
 # Columns the expression card's provenance note claims are computed rather
 # than carried from a GDC record. Declared so a schema change that adds a
 # derived field fails a test instead of silently making the card wrong.
-CARD_MODULE_COMPUTED_COLUMNS = {"sample_index", "gene_index", "strand_balance"}
+CARD_MODULE_COMPUTED_COLUMNS = {"aliquot_index", "gene_index", "strand_balance", "source_file_url"}
+
+# The expression card stands alone: it links GDC documentation and the
+# pipeline source, never another dataset on the Hub, so publishing a sibling
+# dataset never obliges an edit here.
+_EXPRESSION_LINK_REFS = """\
+[gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
+[gdc-mrna]: https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/
+[gdc-sample-types]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes
+[gdc-api-versions]: https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/#example-of-retrieving-file-version-information
+[gdc-api-data]: https://docs.gdc.cancer.gov/API/Users_Guide/Downloading_Files/#downloading-a-single-file-using-get
+[dd-case]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=case
+[dd-sample]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=sample
+[dd-portion]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=portion
+[dd-analyte]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=analyte
+[dd-aliquot]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=aliquot
+[gdc-uuid]: https://docs.gdc.cancer.gov/Encyclopedia/pages/UUID/
+[gdc-barcode]: https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/
+[gdc-analyte-codes]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/portion-analyte-codes
+[gdc-center-codes]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/center-codes
+[repo]: https://github.com/galtay/tcga2hf
+"""
+
+
+# The expression card's data dictionary: (column, meaning, source) per config.
+# `source` is a key into _EXPRESSION_SOURCES, so every column states where
+# its value comes from, and "computed" rows are checked by a test against
+# CARD_MODULE_COMPUTED_COLUMNS. Every schema column must appear here.
+_EXPRESSION_DICTIONARY: dict[str, list[tuple[str, str, str]]] = {
+    "aliquots": [
+        ("aliquot_index", "Row number; row *i* of every measure config", "computed"),
+        ("aliquot_id", "Aliquot UUID", "aliquot.id"),
+        ("aliquot_submitter_id", "Aliquot barcode", "aliquot.submitter_id"),
+        ("analyte_id", "UUID of the analyte the aliquot was drawn from", "analyte.id"),
+        ("analyte_submitter_id", "Analyte barcode", "analyte.submitter_id"),
+        ("analyte_type", "Kind of molecule extracted, e.g. `RNA`", "analyte.analyte_type"),
+        ("portion_id", "UUID of the portion the analyte was extracted from", "portion.id"),
+        ("portion_submitter_id", "Portion barcode", "portion.submitter_id"),
+        ("sample_id", "UUID of the sample the portion was cut from", "sample.id"),
+        ("sample_submitter_id", "Sample barcode", "sample.submitter_id"),
+        ("sample_type", "Where the sample came from, e.g. `Primary Tumor`", "sample.sample_type"),
+        ("case_id", "UUID of the patient", "case.id"),
+        ("case_submitter_id", "Patient barcode", "case.submitter_id"),
+        ("project_id", "TCGA project, e.g. `TCGA-BRCA`", "project"),
+        ("source_file_id", "UUID of the GDC file this row was read from", "gene_expression.id"),
+        ("source_file_md5sum", "GDC's MD5 checksum of that file", "gene_expression.md5sum"),
+        ("source_file_version", "The file's version number", "versions"),
+        ("source_file_first_release", "First GDC release that served the file", "versions"),
+        ("source_file_url", "Download URL for the file", "computed"),
+        (
+            "strand_balance",
+            "`stranded_first / (stranded_first + stranded_second)` over all genes",
+            "computed",
+        ),
+        ("n_unmapped", "Reads that did not align to the genome", "star"),
+        ("n_multimapping", "Reads that aligned to more than one place", "star"),
+        ("n_nofeature", "Aligned reads that overlap no gene", "star"),
+        ("n_ambiguous", "Aligned reads that overlap more than one gene", "star"),
+    ],
+    "genes": [
+        ("gene_index", "Position in every `values` list", "computed"),
+        ("gene_id", "Ensembl gene ID with version, e.g. `ENSG00000000003.15`", "star"),
+        ("gene_name", "Gene symbol", "star"),
+        ("gene_type", "GENCODE gene type, e.g. `protein_coding`", "star"),
+        ("chromosome", "Chromosome (GRCh38); null where the source omits the gene", "cnv"),
+        ("start", "Start position (GRCh38)", "cnv"),
+        ("end", "End position (GRCh38)", "cnv"),
+    ],
+    "measure": [
+        ("aliquot_index", "Row number, as in `aliquots`", "copy"),
+        ("aliquot_id", "As in `aliquots`", "copy"),
+        ("case_submitter_id", "As in `aliquots`", "copy"),
+        ("project_id", "As in `aliquots`", "copy"),
+        ("sample_type", "As in `aliquots`", "copy"),
+        ("values", "One number per gene, in `genes` order", "star"),
+    ],
+}
+
+_EXPRESSION_SOURCES = {
+    "computed": "computed here",
+    "copy": "copied from `aliquots`",
+    "versions": "GDC [`/files/versions`][gdc-api-versions]",
+    "star": "GDC expression file",
+    "cnv": "GDC gene-level copy number file",
+}
+
+
+_GDC_DICTIONARY_VIEWER = (
+    "https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view"
+)
+
+
+def _source_cell(source: str) -> str:
+    """A dictionary row's source: a named origin, or a GDC dictionary entry.
+
+    Anything not in _EXPRESSION_SOURCES is `entity` or `entity.field` in the
+    GDC data dictionary, linked to the field's own anchor when there is one.
+    """
+    if source in _EXPRESSION_SOURCES:
+        return _EXPRESSION_SOURCES[source]
+    entity, _, field = source.partition(".")
+    url = f"{_GDC_DICTIONARY_VIEWER}&id={entity}" + (f"&anchor={field}" if field else "")
+    return f"GDC [`{source}`]({url})"
+
+
+def _dictionary_table(config: str) -> str:
+    rows = "\n".join(
+        f"| `{column}` | {meaning} | {_source_cell(source)} |"
+        for column, meaning, source in _EXPRESSION_DICTIONARY[config]
+    )
+    return f"| column | meaning | source |\n|---|---|---|\n{rows}"
+
+
+def _aliquot_facts(out_dir: Path) -> dict[str, Any]:
+    """The sizes the card's header states, read off the built table.
+
+    Only structural counts: the card describes the files it ships beside,
+    so these cannot drift from them. Anything that would need rechecking
+    when the data changes is left to a snippet the reader can run instead.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(out_dir / "aliquots" / "data.parquet", columns=["case_id"])
+    return {
+        "n_aliquots": table.num_rows,
+        "n_cases": len(table.column("case_id").unique()),
+    }
 
 
 def write_expression_card(
     out_dir: Path,
     counts: dict[str, int],
     projects: list[str],
-    gdc_release: str | None = None,
+    release: dict[str, Any],
 ) -> Path:
     """Write the card for the expression-only dataset.
 
@@ -1506,17 +1633,20 @@ def write_expression_card(
 
     This card describes a *reshape*, not a new derivation, and says so
     plainly: the numbers are GDC's, the axes are the same GENCODE v36 model
-    every per-gene file repeats, and anything not carried here is carried
-    in the per-project datasets.
+    every per-gene file repeats. `release` is the GDC `/status` payload
+    recorded when the expression files were fetched.
     """
     from tcga2hf_pipeline.gene_expression_quantification import QUANTIFICATIONS
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     repo_id = "gabrielaltay/tcga-gene-expression-quantification-open"
-    release = gdc_release or "unknown (status file missing)"
-    n_samples = counts.get("samples", 0)
+    facts = _aliquot_facts(out_dir)
+    n_aliquots = facts["n_aliquots"]
     n_genes = counts.get("genes", 0)
-    order = ["genes", "samples", *QUANTIFICATIONS]
+    release_number = "{major}.{minor}".format(**release["data_release_version"])
+    release_date = release["data_release_version"]["release_date"]
+
+    order = ["genes", "aliquots", *QUANTIFICATIONS]
     lines = ["configs:"]
     for name in order:
         if not (out_dir / name / "data.parquet").exists():
@@ -1556,31 +1686,37 @@ tags:
             f"""\
 # TCGA Gene Expression Quantification — Open Access
 
-Cohort-wide gene expression matrices for the open-access TCGA RNA-Seq data distributed by the NCI Genomic Data Commons. GDC serves these measurements one file per aliquot; here they are arranged as one row per sample, with each quantification carried as its own matrix over identical axes.
+Every open-access TCGA RNA-Seq gene expression file from the NCI Genomic Data Commons (GDC), stacked into matrices: one row per sequenced tube of RNA, called an *aliquot*, and one column per gene. Every value is exactly as GDC published it.
 
-- **GDC data release:** {release}
+- **Size:** {n_aliquots:,} aliquots × {n_genes:,} genes, from {facts["n_cases"]:,} patients in {len(projects)} TCGA projects
+- **Source:** GDC Data Release {release_number} ({release_date})
 - **Built:** {timestamp}
-- **Shape:** {n_samples:,} samples x {n_genes:,} genes
-- **Projects:** {len(projects)}
 
-Other modalities for the same cases — clinical, survival, mutation, methylation, copy number — are published per project as `tcga-<project>-tabular-open`, where this expression data also appears, in its `gene_expression_quantification` config, as one row per (aliquot, gene).
+## The source files
 
-## Structure
+GDC runs every aliquot through its [mRNA pipeline][gdc-mrna]: the STAR aligner counts the sequencing reads on each of {n_genes:,} GENCODE v36 genes. Each output file has six numbers per gene, which this card calls *measures*:
 
-A value config holds one row per sample, and each row's `values` list runs in the order given by `genes`. Both axes have their own config:
+| measure | what it is |
+|---|---|
+| `unstranded` | reads counted on the gene |
+| `stranded_first`, `stranded_second` | the same reads, split by DNA strand (see *Before you model*) |
+| `tpm_unstranded` | transcripts per million: counts adjusted for gene length, scaled so each aliquot sums to 1,000,000 |
+| `fpkm_unstranded` | fragments per kilobase per million: counts adjusted for gene length and sequencing depth |
+| `fpkm_uq_unstranded` | FPKM with depth taken from the 75th-percentile gene count instead of the total |
 
-| config | rows | what a row is |
-|---|---:|---|
-| `genes` | {n_genes:,} | one gene from GDC's [GENCODE v36][gdc-mrna] model, in array order |
-| `samples` | {n_samples:,} | one aliquot, in row order |
+Four more lines in each file count the reads that no gene received.
 
-Each quantification forms a separate config, named for the column it occupies in the source TSV, so an analysis retrieves only the measure it uses. The value configs repeat `sample_index`, `aliquot_id`, `case_submitter_id`, `project_id` and `sample_type` inline, which removes the axis join from a training loop.
+## Layout
+
+Each measure is its own *config*, a table you load by name, with one row per aliquot and a `values` list of {n_genes:,} numbers:
 
 | config | dtype | size |
 |---|---|---:|
 {quant_rows}
 
-## Usage
+Two more configs index the axes. Row *i* of `aliquots` describes row *i* of every measure config, and row *j* of `genes` describes position *j* of every `values` list. Measure configs also repeat `aliquot_index`, `aliquot_id`, `project_id`, `sample_type` and the patient's `case_submitter_id`, so training needs no join.
+
+## Load it
 
 ```python
 from datasets import load_dataset
@@ -1589,60 +1725,73 @@ REPO = "{repo_id}"
 ds = load_dataset(REPO, "tpm_unstranded", split="train")
 ```
 
-Each row's `values` is a list of {n_genes:,} floats in `genes` order. The `samples` and `genes` configs are returned in matrix order, so they serve directly as an `AnnData`'s `obs` and `var`:
+`aliquots` and `genes` are in matrix order, so they become an `AnnData`'s `obs` and `var`:
 
 ```python
 import anndata as ad
 import numpy as np
 
-obs = load_dataset(REPO, "samples", split="train").to_pandas().set_index("aliquot_id")
+obs = load_dataset(REPO, "aliquots", split="train").to_pandas().set_index("aliquot_id")
 var = load_dataset(REPO, "genes", split="train").to_pandas().set_index("gene_id")
-X = np.stack(ds.with_format("numpy")["values"])   # ({n_samples:,}, {n_genes:,}) float32
+X = np.stack(ds.with_format("numpy")["values"])   # ({n_aliquots:,}, {n_genes:,}) float32
 
 adata = ad.AnnData(X=X, obs=obs, var=var)
 ```
 
-## Notes on the data
+The examples below use this `adata`.
 
-The examples below continue from the `adata` assembled above.
+## Where each row comes from
 
-**Carried and computed.** Three columns are computed here; everything else is GDC's. `sample_index` and `gene_index` number the rows so the two axes can be addressed by position, and `strand_balance` is defined under *Strandedness* below.
+TCGA tracks material as a tree from patient to sequenced tube. GDC's [data dictionary][gdc-dict] defines five levels:
 
-Everything else is carried through as GDC records it: the quantification values, the GENCODE v36 gene model, the identifiers, `sample_type`, and the four read tallies. The values are stored as `int32` for the counts and `float32` for the normalized measures — narrower than the source TSV's text, and wide enough for every digit GDC prints.
+| level | what it is |
+|---|---|
+| [case][dd-case] | "all data related to a specific subject in the context of a specific project": one patient |
+| [sample][dd-sample] | material taken from the patient, such as a tumour or adjacent normal tissue |
+| [portion][dd-portion] | "a physical sub-part of any sample" |
+| [analyte][dd-analyte] | "a liquid bulk product" extracted from a portion; here, RNA |
+| [aliquot][dd-aliquot] | a measured volume of analyte; the thing that was sequenced |
 
-**Gene coverage.** All {n_genes:,} GENCODE v36 features are retained; no expression threshold or biotype filter is applied. `gene_type` on `genes` supports restriction by biotype where an analysis calls for it.
+**Every level has a UUID and a barcode.** `*_id` columns hold GDC's [UUID][gdc-uuid] and `*_submitter_id` columns hold the human-readable [TCGA barcode][gdc-barcode]. `aliquots` has both for every level, so labels at any level join directly.
+
+**A barcode extends its parent's barcode.** For example, `TCGA-02-0047-01A` is a primary-tumour sample from patient `TCGA-02-0047`:
+
+| `TCGA-02-0047` | `-01` | `A` | `-01` | `R` | `-1849` | `-01` |
+|---|---|---|---|---|---|---|
+| case | sample type ([codes][gdc-sample-types]) | vial | portion | analyte type ([codes][gdc-analyte-codes]) | plate | sequencing center ([codes][gdc-center-codes]) |
+
+**Join on the ID columns, not on sliced barcodes.** Some barcodes in GDC's records do not extend their parent's, and slicing them finds no entity or the wrong one. To list them:
 
 ```python
-adata[:, adata.var.gene_type == "protein_coding"]
+from itertools import pairwise
+
+barcodes = adata.obs[[f"{{level}}_submitter_id" for level in ["case", "sample", "portion", "analyte", "aliquot"]]]
+nests = barcodes.apply(lambda r: all(child.startswith(parent) for parent, child in pairwise(r)), axis=1)
+adata.obs.loc[~nests, barcodes.columns]
 ```
 
-**Strandedness.** Three count columns are published — `unstranded`, `stranded_first` and `stranded_second`. GDC resolves the choice between them at the pipeline level:
+**Rows are not independent.** A sample sequenced twice has two rows, and if they share an `analyte_id` they are one RNA extraction sequenced twice. A patient can also have several samples, such as a tumour and its matched normal.
+
+```python
+adata.obs.sample_id.duplicated(keep=False).sum()   # rows from samples sequenced more than once
+adata.obs.sample_type.value_counts()               # tumours, normals and other sample types
+```
+
+## Before you model
+
+**Model the unstranded measures.** GDC normalizes only the unstranded counts:
 
 > To facilitate harmonization across samples, all RNA-Seq reads are treated as unstranded during analyses.
 >
 > — [mRNA Analysis Pipeline][gdc-mrna], Introduction
 
-The normalized quantifications therefore exist only in `*_unstranded` form. All three count columns are published as GDC distributes them, and `samples.strand_balance` — `stranded_first / (stranded_first + stranded_second)` over the library — is provided for anyone wishing to examine the underlying protocol.
+The stranded counts matter only for checking the lab protocol. `strand_balance` is `stranded_first / (stranded_first + stranded_second)` over all genes: near 0.5 when the protocol did not record strand, near 0 or 1 when it did.
 
 ```python
-adata[adata.obs.strand_balance.between(0.4, 0.6)]   # libraries that are not strand-specific
+adata[adata.obs.strand_balance.between(0.4, 0.6)]   # aliquots whose protocol did not record strand
 ```
 
-**Repeated sampling.** A case may contribute more than one aliquot, so samples are not independent within a patient. `case_submitter_id` appears on every value config.
-
-```python
-adata.obs.case_submitter_id.value_counts().gt(1).sum()   # cases contributing more than one
-```
-
-**Sample types.** Primary tumours, solid tissue normals, metastatic and recurrent samples are all present, distinguished by `sample_type` ([Sample Type codes][gdc-sample-types]).
-
-```python
-adata.obs.sample_type.value_counts()
-```
-
-**Library composition.** Each sample carries STAR's four unassigned-read tallies — `n_unmapped`, `n_multimapping`, `n_nofeature`, `n_ambiguous` — which together with the gene counts account for every read in the library. The proportion assigned to genes varies from roughly 25% to 81% across the cohort and covaries with project.
-
-The proportion is computed from a count column. TPM and FPKM are normalized per library — `tpm_unstranded` sums to 1e6 for every sample — so they cannot express it.
+**Condition on the share of reads assigned to genes.** It varies between aliquots and between projects. The `n_*` columns count the reads no gene received, taken from the file's `unstranded` column, so together with the `unstranded` counts they total every read. TPM and FPKM are normalized per aliquot and cannot show this share.
 
 ```python
 counts = load_dataset(REPO, "unstranded", split="train").with_format("numpy")
@@ -1652,6 +1801,59 @@ unassigned = adata.obs[["n_unmapped", "n_multimapping", "n_nofeature", "n_ambigu
 fraction = assigned / (assigned + unassigned.to_numpy())
 ```
 
+**Every gene is kept.** No expression or gene-type filter is applied; filter with `gene_type`:
+
+```python
+adata[:, adata.var.gene_type == "protein_coding"]
+```
+
+Gene coordinates come from GDC's gene-level copy number files, which use the same GENCODE v36 annotation. Genes missing from those files have null coordinates.
+
+## Versions
+
+**GDC files rarely change between releases.** GDC versions each file separately, and a new release leaves most files untouched. `source_file_id` and `source_file_md5sum` identify the exact file behind each row.
+
+**Pin a revision.** Each upload to the Hub is a commit, and the card in each commit names its GDC release:
+
+```python
+load_dataset(REPO, "tpm_unstranded", revision="<commit sha>")
+```
+
+## Check any row against GDC
+
+`source_file_url` downloads the row's file from GDC's [data endpoint][gdc-api-data], with no login:
+
+```python
+import hashlib, io, urllib.request
+import pandas as pd
+
+row = adata.obs.iloc[0]
+raw = urllib.request.urlopen(row.source_file_url).read()
+assert hashlib.md5(raw).hexdigest() == row.source_file_md5sum
+
+tsv = pd.read_csv(io.BytesIO(raw), sep="\\t", comment="#").iloc[4:]   # drop the four uncounted-read lines
+assert (tsv.gene_id.to_numpy() == adata.var_names).all()
+assert (tsv.tpm_unstranded.to_numpy(dtype="float32") == adata.X[0]).all()
+```
+
+A 404 means GDC no longer serves the file.
+
+## Data dictionary
+
+Columns not marked *computed here* are exactly as GDC published them.
+
+**`aliquots`**, one row per aliquot:
+
+{_dictionary_table("aliquots")}
+
+**`genes`**, one row per gene:
+
+{_dictionary_table("genes")}
+
+**Measure configs** (`unstranded`, `tpm_unstranded`, ...), one row per aliquot:
+
+{_dictionary_table("measure")}
+
 """,
             # Joined rather than concatenated, as the other cards are. Each
             # section ends with a single newline, so `+` would run the next
@@ -1660,7 +1862,7 @@ fraction = assigned / (assigned + unassigned.to_numpy())
             # rather than defining a link.
             _gdc_references("mrna", "sample_types", "barcode", "dictionary"),
             _LICENSE_AND_REDISTRIBUTION,
-            _LINK_REFS,
+            _EXPRESSION_LINK_REFS,
         ]
     )
 
