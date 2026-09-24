@@ -23,6 +23,7 @@ References:
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -161,3 +162,126 @@ def attach_cdr(
             row[c] = record[c]
         row["cdr_survival_complete"] = all(record[c] is not None for c in cdr_cols)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# The published CDR dataset: Liu's patient-level sheets, as published.
+# ---------------------------------------------------------------------------
+
+CDR_SOURCE_URL = f"https://api.gdc.cancer.gov/data/{CDR_FILE_UUID}"
+
+# Config name -> (data sheet, notes sheet). The workbook's other sheets are
+# the paper's statistics tables and a tissue-source-site code list, not
+# patient data.
+CDR_CONFIGS: dict[str, tuple[str, str]] = {
+    "cdr": ("TCGA-CDR", "TCGA-CDR_Notes"),
+    "extra_endpoints": ("ExtraEndpoints", "ExtraEndpoints_Notes"),
+}
+
+# Excel's "value not available" error. It is the only error the workbook's
+# data sheets hold, and marks a missing value in text and integer columns
+# alike; `read_sheet` refuses any other error rather than guess its meaning.
+MISSING = "#N/A"
+
+
+def read_sheet(path: Path, sheet: str) -> Any:
+    """One data sheet as an Arrow table, values as Liu published them.
+
+    Two changes, both mechanical. The unlabelled first column is the
+    spreadsheet's row number (1..n) and is dropped; row order is kept.
+    Cells holding Excel's `#N/A` error become null. Recognised by cell
+    type, not text, so a literal "#N/A" string would survive.
+
+    A column of integers (and nulls) becomes int32; every other column is
+    text, verbatim -- `[Not Available]`, `[Not Applicable]` and empty
+    strings are distinct values in the source and stay distinct here.
+    Header names are kept, dots included, because that is how the paper
+    and its users name them. Raises on any cell that fits neither rule.
+    """
+    import openpyxl
+    import pyarrow as pa
+
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        rows = []
+        for row in workbook[sheet].iter_rows():
+            values = []
+            for cell in row:
+                if cell.data_type == "e":
+                    if cell.value != MISSING:
+                        raise ValueError(f"{sheet}!{cell.coordinate}: unexpected {cell.value}")
+                    values.append(None)
+                else:
+                    values.append(cell.value)
+            rows.append(values)
+    finally:
+        workbook.close()
+    header, body = rows[0], rows[1:]
+
+    if header[0] is not None or [r[0] for r in body] != [str(i) for i in range(1, len(body) + 1)]:
+        raise ValueError(f"{sheet}: first column is not the unlabelled row number 1..n")
+
+    columns: dict[str, Any] = {}
+    for j, name in enumerate(header[1:], start=1):
+        values = [r[j] for r in body]
+        present = [v for v in values if v is not None]
+        # `bool` subclasses `int`; a TRUE cell is not a day count.
+        if present and all(isinstance(v, int) and not isinstance(v, bool) for v in present):
+            columns[name] = pa.array(values, pa.int32())
+        elif all(isinstance(v, str) for v in present):
+            columns[name] = pa.array(values, pa.string())
+        else:
+            kinds = sorted({type(v).__name__ for v in present})
+            raise ValueError(f"{sheet}.{name}: mixed cell types {kinds}; refusing to guess")
+    return pa.table(columns)
+
+
+def read_notes(path: Path, sheet: str) -> list[tuple[int, str]]:
+    """A notes sheet as (indent, text) lines, one per non-empty row.
+
+    Liu nests the notes by column: a heading in column A, its entries in
+    B, continuation lines in C. The indent is that column's index, so the
+    card can render the same nesting.
+    """
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        rows = list(workbook[sheet].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    lines = []
+    for row in rows:
+        cells = [(j, str(v)) for j, v in enumerate(row) if v is not None and str(v).strip()]
+        if len(cells) > 1:
+            raise ValueError(f"{sheet}: a row fills more than one column: {cells}")
+        lines.extend(cells)
+    return lines
+
+
+def build(raw_dir: Path, out_dir: Path) -> dict[str, int]:
+    """Write `<out_dir>/<config>/data.parquet` per sheet and ship the workbook.
+
+    The workbook is copied to `<out_dir>/source/` unchanged, so every value
+    can be checked against the bytes GDC serves. Refuses a workbook whose
+    md5 is not the pinned one: the CDR is frozen, and different bytes mean
+    something upstream changed that a human should look at first.
+    """
+    import pyarrow.parquet as pq
+
+    src = raw_dir / "cdr" / CDR_FILE_NAME
+    if not src.exists():
+        raise FileNotFoundError(f"{src} missing. Run `tcga2hf-pipeline fetch-cdr`.")
+    actual_md5 = hashlib.md5(src.read_bytes()).hexdigest()
+    if actual_md5 != CDR_FILE_MD5:
+        raise ValueError(f"{src} md5 is {actual_md5}, expected {CDR_FILE_MD5}")
+
+    counts = {}
+    for config, (sheet, _) in CDR_CONFIGS.items():
+        table = read_sheet(src, sheet)
+        (out_dir / config).mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, out_dir / config / "data.parquet")
+        counts[config] = table.num_rows
+    (out_dir / "source").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, out_dir / "source" / CDR_FILE_NAME)
+    return counts

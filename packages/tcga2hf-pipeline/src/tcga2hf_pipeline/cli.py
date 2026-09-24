@@ -1958,5 +1958,127 @@ def upload_gene_expression_quantification_cmd(
     typer.echo(f"\nuploaded -> {url}")
 
 
+@app.command("build-cdr")
+def build_cdr_cmd(
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Build the Liu et al. 2018 TCGA-CDR dataset from the GDC workbook.
+
+    Writes `<data-dir>/processed_cdr/`, the repo root for
+    `gabrielaltay/tcga-pancanatlas-cdr`: one config per patient-level sheet,
+    values as published, plus the workbook itself under `source/`. Fetches
+    the workbook first if it is not already on disk.
+    """
+    root = _resolve_data_dir(data_dir)
+    raw_dir = root / "raw"
+    out_dir = root / "processed_cdr"
+    typer.echo(f"source:  {raw_dir / 'cdr' / cdr.CDR_FILE_NAME}")
+    typer.echo(f"output:  {out_dir}")
+
+    workbook = cdr.fetch_cdr_workbook(raw_dir)
+    if out_dir.exists():
+        # The tree is small and rebuilt whole, so nothing stale survives.
+        shutil.rmtree(out_dir)
+    counts = cdr.build(raw_dir, out_dir)
+    for name, n in counts.items():
+        typer.echo(f"  {name:<18}{n:>8,} rows")
+
+    notes = {
+        config: cdr.read_notes(workbook, notes_sheet)
+        for config, (_, notes_sheet) in cdr.CDR_CONFIGS.items()
+    }
+    card = dataset_card.write_cdr_card(out_dir, counts, notes)
+    typer.echo(f"\nwrote dataset card -> {card}")
+    typer.echo("verify with: tcga2hf-pipeline verify-cdr")
+
+
+@app.command("verify-cdr")
+def verify_cdr_cmd(
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Check the built CDR dataset against the workbook and against GDC.
+
+    The shipped workbook must be the bytes GDC lists and serves today, every
+    config cell must equal its workbook cell, and every patient must be a
+    TCGA case GDC serves. Exits non-zero if any check fails.
+    """
+    root = _resolve_data_dir(data_dir)
+    checks = verify.verify_cdr(root / "processed_cdr")
+    typer.echo("verifying the CDR dataset\n")
+    for check in checks:
+        typer.echo(f"[{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
+        for line in check.details:
+            typer.echo(line)
+    failed = [c.name for c in checks if not c.passed]
+    typer.echo("")
+    if failed:
+        typer.echo(f"{len(failed)} check(s) failed: {', '.join(failed)}")
+        raise typer.Exit(code=1)
+    typer.echo(f"all {len(checks)} checks passed")
+
+
+@app.command("upload-cdr")
+def upload_cdr_cmd(
+    repo_id: Annotated[
+        str,
+        typer.Option("--repo-id", help="HF dataset repo id."),
+    ] = dataset_card.CDR_REPO_ID,
+    private: Annotated[
+        bool,
+        typer.Option("--private/--public", help="Upload as private, or public."),
+    ] = False,
+    commit_message: Annotated[
+        str | None,
+        typer.Option("--commit-message", "-m", help="Commit message for this upload."),
+    ] = None,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Verify `<data-dir>/processed_cdr/`, then push it to HF Hub.
+
+    Always verifies first: the dataset's one claim is that it matches the
+    workbook GDC serves, and the checks take seconds. Refuses to run while
+    stray files sit in the tree, since `upload_folder` would publish them.
+    """
+    root = _resolve_data_dir(data_dir)
+    processed_dir = root / "processed_cdr"
+    if not processed_dir.exists():
+        raise typer.BadParameter(f"{processed_dir} does not exist. Run `build-cdr`.")
+
+    expected = {
+        Path("README.md"),
+        Path("source") / cdr.CDR_FILE_NAME,
+        *(Path(config) / "data.parquet" for config in cdr.CDR_CONFIGS),
+    }
+    present = {p.relative_to(processed_dir) for p in processed_dir.rglob("*") if p.is_file()}
+    if present != expected:
+        strays = ", ".join(str(s) for s in sorted(present - expected))
+        missing = ", ".join(str(s) for s in sorted(expected - present))
+        raise typer.BadParameter(
+            f"{processed_dir} is not a clean build (unexpected: {strays or 'none'}; "
+            f"missing: {missing or 'none'}). Re-run `build-cdr`."
+        )
+
+    typer.echo(f"processed dir: {processed_dir}")
+    typer.echo(f"repo_id:       {repo_id} ({'private' if private else 'PUBLIC'})")
+    typer.echo("\nverifying before publishing ...")
+    checks = verify.verify_cdr(processed_dir)
+    for check in checks:
+        typer.echo(f"  [{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
+        if not check.passed:
+            for line in check.details:
+                typer.echo(f"  {line}")
+    failed = [c.name for c in checks if not c.passed]
+    if failed:
+        raise typer.BadParameter(f"not uploading: {', '.join(failed)} failed.")
+
+    url = hf_upload.upload_dataset(
+        processed_dir=processed_dir,
+        repo_id=repo_id,
+        private=private,
+        commit_message=commit_message or "Update TCGA-CDR (Liu et al. 2018) dataset",
+    )
+    typer.echo(f"\nuploaded -> {url}")
+
+
 if __name__ == "__main__":
     app()

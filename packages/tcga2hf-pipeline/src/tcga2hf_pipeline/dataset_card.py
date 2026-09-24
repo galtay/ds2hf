@@ -1870,3 +1870,223 @@ Columns not marked *computed here* are exactly as GDC published them.
     out_path = out_dir / "README.md"
     out_path.write_text(frontmatter + body)
     return out_path
+
+
+# ===========================================================================
+# Liu et al. 2018 TCGA-CDR card
+# ===========================================================================
+
+CDR_REPO_ID = "gabrielaltay/tcga-pancanatlas-cdr"
+
+# Standalone, as the expression card is: GDC, the paper and the pipeline
+# source only, never another dataset on the Hub.
+_CDR_LINK_REFS = """\
+[liu]: https://doi.org/10.1016/j.cell.2018.02.052
+[gdc-pancan]: https://gdc.cancer.gov/about-data/publications/pancanatlas
+[gdc-pancan-manifest]: https://gdc.cancer.gov/system/files/public/file/PanCan-General_Open_GDC-Manifest_2.txt
+[gdc-api-data]: https://docs.gdc.cancer.gov/API/Users_Guide/Downloading_Files/#downloading-a-single-file-using-get
+[gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
+[dd-case]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=case&anchor=submitter_id
+[repo]: https://github.com/galtay/tcga2hf
+"""
+
+
+def _cdr_notes_md(lines: list[tuple[int, str]]) -> str:
+    """Liu's notes sheet as nested bullets, nesting by spreadsheet column."""
+    return "\n".join(f"{'  ' * indent}- {' '.join(text.split())}" for indent, text in lines)
+
+
+def write_cdr_card(
+    out_dir: Path,
+    counts: dict[str, int],
+    notes: dict[str, list[tuple[int, str]]],
+) -> Path:
+    """Write the card for the Liu et al. 2018 TCGA-CDR dataset.
+
+    `notes` maps config name to the (indent, text) lines of its notes sheet,
+    read from the workbook at build time so the card quotes the source
+    rather than a transcription of it.
+    """
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.cdr import (
+        CDR_CONFIGS,
+        CDR_FILE_MD5,
+        CDR_FILE_NAME,
+        CDR_FILE_UUID,
+        CDR_SOURCE_URL,
+    )
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    repo_id = CDR_REPO_ID
+    projects = pq.read_table(out_dir / "cdr" / "data.parquet", columns=["type"]).column("type")
+    n_patients = counts["cdr"]
+    n_projects = len(projects.unique())
+
+    lines = ["configs:"]
+    for name in CDR_CONFIGS:
+        lines.append(f"  - config_name: {name}")
+        lines.append("    data_files:")
+        lines.append("      - split: train")
+        lines.append(f"        path: {name}/data.parquet")
+    configs_block = "\n".join(lines)
+
+    frontmatter = f"""---
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Pan-Cancer Clinical Data Resource (Liu et al. 2018)
+tags:
+  - cancer
+  - tcga
+  - clinical
+  - survival-analysis
+{configs_block}
+---
+"""
+
+    body = "\n".join(
+        [
+            f"""\
+# TCGA Pan-Cancer Clinical Data Resource (TCGA-CDR)
+
+The survival endpoints and curated clinical fields that [Liu et al. (2018)][liu] published for TCGA patients, exactly as published. The paper calls this table the TCGA Pan-Cancer Clinical Data Resource, or TCGA-CDR.
+
+- **Size:** {n_patients:,} patients in {n_projects} TCGA projects
+- **Source:** `{CDR_FILE_NAME}` from GDC's [PanCanAtlas publication page][gdc-pancan], file `{CDR_FILE_UUID}`, MD5 `{CDR_FILE_MD5}`
+- **Built:** {timestamp}
+
+## Endpoints
+
+A survival *endpoint* is a pair of columns: an event flag, 1 if the event happened and 0 if the patient was censored, and a time in days. Liu et al. define four:
+
+| endpoint | columns | event |
+|---|---|---|
+| overall survival | `OS`, `OS.time` | death from any cause |
+| disease-specific survival | `DSS`, `DSS.time` | death from the cancer |
+| disease-free interval | `DFI`, `DFI.time` | a new tumour after the patient was disease free |
+| progression-free interval | `PFI`, `PFI.time` | a new tumour, progression, or death with the cancer |
+
+**Prefer PFI and OS.** Liu et al.'s recommendation, from the workbook:
+
+> For clinical outcome endpoints, we recommend the use of PFI for progression-free interval, and OS for overall survival. Both endpoints are relatively accurate. Given the relatively short follow-up time, PFI is preferred over OS.
+
+**DSS and DFI are approximate or missing for some cancers.** Liu et al. list which ones under *Column definitions* below, and Table 3 of the paper gives a recommendation per cancer type.
+
+**Null means no value.** An endpoint is null where its definition excludes the patient, such as DFI for stage IV, or where the records lack what it needs.
+
+## Configs
+
+A *config* is one table, loaded by name. Each is one sheet of the workbook, one row per patient:
+
+| config | sheet | contents |
+|---|---|---|
+| `cdr` | `TCGA-CDR` | clinical fields, the four endpoints, `Redaction` |
+| `extra_endpoints` | `ExtraEndpoints` | PFI variants, progression-free survival (PFS), and competing-risk versions of the endpoints |
+
+Row *i* of both configs is the same patient.
+
+## Load it
+
+```python
+from datasets import load_dataset
+
+REPO = "{repo_id}"
+cdr = load_dataset(REPO, "cdr", split="train").to_pandas()
+
+pfi = cdr[cdr.Redaction != "Redacted"].dropna(subset=["PFI", "PFI.time"])
+```
+
+**Redacted patients are flagged, not removed.** `Redaction` is `Redacted` for patients TCGA redacted and an empty string otherwise; the example above drops them.
+
+**Quote dotted column names in SQL.** Names are Liu et al.'s own, dots included:
+
+```python
+import duckdb
+
+duckdb.sql(f\"\"\"
+    SELECT type, count(*) AS patients, avg("PFI.time") AS mean_pfi_days
+    FROM 'hf://datasets/{{REPO}}/cdr/data.parquet'
+    GROUP BY type ORDER BY type
+\"\"\")
+```
+
+## Join to other TCGA data
+
+**`bcr_patient_barcode` is the TCGA patient barcode.** It equals the GDC case's [`submitter_id`][dd-case], so it joins to any table keyed by patient barcode or GDC case.
+
+**`type` is the TCGA project without its prefix.** `BRCA` here is GDC project `TCGA-BRCA`.
+
+## A 2018 snapshot
+
+**Values are frozen at Liu et al.'s data freeze.** GDC has received more follow-up since, so its current records can disagree with these, and cases GDC added later are absent. Use this dataset to reproduce or compare with work built on the TCGA-CDR; derive endpoints from current GDC records for the latest follow-up.
+
+## Differences from the workbook
+
+**Two mechanical changes; every value is otherwise as published.**
+
+- The first column, an unlabelled spreadsheet row number, is dropped. Row order is kept.
+- Missing values are Excel `#N/A` error cells in the workbook. Here they are null.
+
+**Text is verbatim, including bracketed codes.** Clinical text columns use the codes of TCGA's Biospecimen Core Resource, which collected the case report forms:
+
+| code | intended meaning |
+|---|---|
+| `[Not Available]` | the form asked, but no value was recorded |
+| `[Not Applicable]` | the question does not apply to this patient |
+| `[Unknown]` | the person completing the form did not know |
+| `[Not Evaluated]` | the item was not assessed |
+| `[Discrepancy]` | sources disagreed |
+
+**The codes are not applied consistently.** `[Not Available]` often marks a question a cancer type's form never asked, not a value missing for one patient: `menopause_status` is `[Not Available]` for men, and `clinical_stage` is `[Not Available]` for cancers with no staging system. Decide per column which codes to treat as missing before using a text column as a covariate. The survival columns are unaffected: their only missing value is null.
+
+**Null and `[Not Available]` differ.** Null marks a value absent from Liu et al.'s merged data, such as `margin_status` outside the cancer types that recorded it.
+
+**Some values join several follow-up records with `|`,** for example `[Not Applicable]|stomach|[Not Applicable]`.
+
+**Only the patient-level sheets are included.** The workbook's other sheets hold the paper's statistical tables and a tissue source site code list.
+
+## Check against GDC
+
+The workbook is in this repository at `source/{CDR_FILE_NAME}`. GDC also serves it from its [data endpoint][gdc-api-data], with no login, and lists its MD5 in the page's [open-access manifest][gdc-pancan-manifest]:
+
+```python
+import hashlib, io, urllib.request
+import pandas as pd
+
+raw = urllib.request.urlopen("{CDR_SOURCE_URL}").read()
+assert hashlib.md5(raw).hexdigest() == "{CDR_FILE_MD5}"
+
+sheet = pd.read_excel(io.BytesIO(raw), sheet_name="TCGA-CDR")
+assert sheet["OS.time"].equals(cdr["OS.time"])   # `cdr` from "Load it"
+```
+
+## Column definitions
+
+Liu et al.'s notes, verbatim from the workbook.
+
+**`cdr`** (sheet `TCGA-CDR_Notes`):
+
+{_cdr_notes_md(notes["cdr"])}
+
+**`extra_endpoints`** (sheet `ExtraEndpoints_Notes`):
+
+{_cdr_notes_md(notes["extra_endpoints"])}
+
+## Citation
+
+Cite the paper when you use this dataset:
+
+> Liu J, Lichtenberg T, Hoadley KA, et al. An Integrated TCGA Pan-Cancer Clinical Data Resource to Drive High-Quality Survival Outcome Analytics. *Cell*. 2018;173(2):400-416.e11. doi:10.1016/j.cell.2018.02.052
+""",
+            # Joined, not concatenated: see write_expression_card.
+            _gdc_references("barcode", "dictionary"),
+            _LICENSE_AND_REDISTRIBUTION,
+            _CDR_LINK_REFS,
+        ]
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "README.md"
+    out_path.write_text(frontmatter + body)
+    return out_path

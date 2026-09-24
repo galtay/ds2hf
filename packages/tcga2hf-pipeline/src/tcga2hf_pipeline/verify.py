@@ -775,3 +775,201 @@ def verify_expression(
     with GDCClient() as client:
         checks.append(check_gdc_current(client, processed_dir))
     return checks
+
+
+# ---------------------------------------------------------------------------
+# Liu et al. 2018 CDR dataset.
+#
+# The source is one frozen workbook, so verification is about identity:
+# the bytes shipped are the bytes GDC serves, and every cell of every
+# config is the cell in that workbook. The workbook is re-read here with
+# pandas rather than the builder's openpyxl walk, so a bug in one reader
+# does not vouch for itself.
+# ---------------------------------------------------------------------------
+
+# GDC's open-access manifest for the PanCanAtlas publication page. It is the
+# only place GDC states this file's md5: the file is served by `/data` but
+# not indexed by `/files`.
+PANCAN_OPEN_MANIFEST_URL = (
+    "https://gdc.cancer.gov/system/files/public/file/PanCan-General_Open_GDC-Manifest_2.txt"
+)
+
+# A TCGA patient barcode: project site code, then participant code.
+_PATIENT_BARCODE = r"^TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}$"
+
+
+def check_cdr_source_pinned(processed: Path) -> Check:
+    """The shipped workbook hashes to the md5 the builder pinned."""
+    from tcga2hf_pipeline.cdr import CDR_FILE_MD5, CDR_FILE_NAME
+
+    path = processed / "source" / CDR_FILE_NAME
+    if not path.exists():
+        return Check("source_pinned", False, f"{path} missing")
+    md5 = hashlib.md5(path.read_bytes()).hexdigest()
+    return Check("source_pinned", md5 == CDR_FILE_MD5, f"shipped {md5}, pinned {CDR_FILE_MD5}")
+
+
+def check_cdr_source_at_gdc(processed: Path) -> Check:
+    """GDC still lists and serves these exact bytes.
+
+    Two independent statements from GDC: the md5 in its open-access
+    manifest, and the md5 of what `/data/<uuid>` returns today without a
+    token. Both must equal the shipped workbook's.
+    """
+    import httpx
+
+    from tcga2hf_pipeline.cdr import CDR_FILE_NAME, CDR_FILE_UUID, CDR_SOURCE_URL
+
+    shipped = hashlib.md5((processed / "source" / CDR_FILE_NAME).read_bytes()).hexdigest()
+    manifest = httpx.get(PANCAN_OPEN_MANIFEST_URL, timeout=60.0, follow_redirects=True)
+    manifest.raise_for_status()
+    listed = {
+        fields[0]: fields
+        for fields in (line.split("\t") for line in manifest.text.splitlines()[1:])
+        if fields and fields[0]
+    }
+    entry = listed.get(CDR_FILE_UUID)
+    manifest_md5 = entry[2] if entry and len(entry) > 2 else None
+
+    served = httpx.get(CDR_SOURCE_URL, timeout=120.0, follow_redirects=True)
+    served_md5 = hashlib.md5(served.content).hexdigest() if served.status_code == 200 else None
+
+    details = [
+        f"  shipped   {shipped}",
+        f"  manifest  {manifest_md5} ({PANCAN_OPEN_MANIFEST_URL})",
+        f"  served    {served_md5} (HTTP {served.status_code}, {CDR_SOURCE_URL})",
+    ]
+    return Check(
+        "source_at_gdc",
+        shipped == manifest_md5 == served_md5,
+        "manifest and /data both match" if shipped == manifest_md5 == served_md5 else "mismatch",
+        details,
+    )
+
+
+def check_cdr_cells(processed: Path) -> Check:
+    """Every config cell equals its workbook cell; nothing added or dropped.
+
+    The one allowed difference is Excel's `#N/A` error cell as null; pandas
+    reads error cells as NaN, and with default NA parsing off nothing else
+    becomes NaN. Column names and order must equal the sheet's header after
+    its unlabelled row-number column, and row order must equal the sheet's.
+    """
+    import math
+
+    import pandas as pd
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.cdr import CDR_CONFIGS, CDR_FILE_NAME
+
+    workbook = processed / "source" / CDR_FILE_NAME
+    details, compared = [], 0
+    for config, (sheet, _) in CDR_CONFIGS.items():
+        # dtype=object and no NA parsing: every cell arrives as Excel stored it.
+        frame = pd.read_excel(workbook, sheet_name=sheet, dtype=object, keep_default_na=False)
+        expected = frame.iloc[:, 1:]
+        ours = pq.read_table(processed / config / "data.parquet")
+        if list(expected.columns) != ours.column_names:
+            details.append(f"  {config}: columns differ from sheet {sheet!r}")
+            continue
+        if len(expected) != ours.num_rows:
+            details.append(f"  {config}: {ours.num_rows} rows, sheet has {len(expected)}")
+            continue
+        for name in ours.column_names:
+            want = [
+                None if isinstance(v, float) and math.isnan(v) else v
+                for v in expected[name].tolist()
+            ]
+            got = ours.column(name).to_pylist()
+            bad = [i for i, (w, g) in enumerate(zip(want, got, strict=True)) if w != g]
+            compared += len(got)
+            if bad:
+                i = bad[0]
+                details.append(
+                    f"  {config}.{name}: {len(bad)} cell(s) differ, e.g. row {i}: "
+                    f"sheet {want[i]!r} vs ours {got[i]!r}"
+                )
+    return Check(
+        "cells_match_workbook",
+        not details,
+        f"{compared:,} cells compared across {len(CDR_CONFIGS)} configs",
+        details,
+    )
+
+
+def check_cdr_keys(processed: Path) -> Check:
+    """One row per patient, a well-formed barcode, the same patients in every config.
+
+    Row *i* of every config is the same patient: the configs share row
+    order as Liu published them, which is what makes a positional or a
+    keyed join equally safe.
+    """
+    import re
+
+    import pyarrow.parquet as pq
+
+    from tcga2hf_pipeline.cdr import CDR_CONFIGS
+
+    keys = {
+        config: pq.read_table(processed / config / "data.parquet", columns=["bcr_patient_barcode"])
+        .column("bcr_patient_barcode")
+        .to_pylist()
+        for config in CDR_CONFIGS
+    }
+    details = []
+    for config, barcodes in keys.items():
+        malformed = [b for b in barcodes if b is None or not re.match(_PATIENT_BARCODE, b)]
+        if malformed:
+            details.append(f"  {config}: {len(malformed)} malformed, e.g. {malformed[:3]}")
+        if len(set(barcodes)) != len(barcodes):
+            details.append(f"  {config}: {len(barcodes) - len(set(barcodes))} duplicate barcode(s)")
+    first, *rest = keys
+    for other in rest:
+        if keys[other] != keys[first]:
+            details.append(f"  {other}: patients or their order differ from {first}")
+    return Check(
+        "patient_keys",
+        not details,
+        f"{len(keys[first]):,} patients, unique and aligned across {len(keys)} configs",
+        details,
+    )
+
+
+def check_cdr_cases_at_gdc(client: GDCClient, processed: Path) -> Check:
+    """Every patient is a TCGA case GDC serves today, by `submitter_id`.
+
+    This is the join the card promises. A barcode GDC no longer serves
+    would make that promise false for its row, so the check fails rather
+    than reports: the card, not just the data, would need a look.
+    """
+    import pyarrow.parquet as pq
+
+    barcodes = set(
+        pq.read_table(processed / "cdr" / "data.parquet", columns=["bcr_patient_barcode"])
+        .column("bcr_patient_barcode")
+        .to_pylist()
+    )
+    hits = client.cases(
+        filters=eq("project.program.name", "TCGA"), fields=["submitter_id"], page_size=5000
+    )
+    at_gdc = {h["submitter_id"] for h in hits}
+    missing = sorted(barcodes - at_gdc)
+    return Check(
+        "cases_at_gdc",
+        not missing,
+        f"{len(barcodes) - len(missing):,} of {len(barcodes):,} patients are GDC TCGA cases",
+        [f"  not at GDC: {b}" for b in missing[:10]],
+    )
+
+
+def verify_cdr(processed_dir: Path) -> list[Check]:
+    """Run every CDR-dataset check. Local ones first, then the network."""
+    checks = [
+        check_cdr_source_pinned(processed_dir),
+        check_cdr_cells(processed_dir),
+        check_cdr_keys(processed_dir),
+        check_cdr_source_at_gdc(processed_dir),
+    ]
+    with GDCClient() as client:
+        checks.append(check_cdr_cases_at_gdc(client, processed_dir))
+    return checks
