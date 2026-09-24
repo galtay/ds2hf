@@ -32,14 +32,26 @@ pytestmark = [
 ]
 
 
+# Per-sample data-type lists (expression vectors, mutations, report PDFs, ...).
+# None of the cohort tests below read them, and holding them for the full
+# cohort as Python objects needs well over 100 GB.
+_DATA_TYPE_FIELDS = {name: [] for name in TcgaHfPatient.model_fields if name.startswith("samples_")}
+
+
 @pytest.fixture(scope="module")
 def all_patients() -> list[TcgaHfPatient]:
-    """Validate every row from every project parquet through TcgaHfPatient."""
+    """Validate every row from every project parquet through TcgaHfPatient.
+
+    Rows are streamed in small batches and each is validated in full; only a
+    copy without the per-sample data-type lists is kept for the cohort tests.
+    """
     patients: list[TcgaHfPatient] = []
     for project_dir in sorted(PROCESSED.glob("TCGA-*")):
-        rows = pq.read_table(project_dir / "data.parquet").to_pylist()
-        for row in rows:
-            patients.append(TcgaHfPatient.model_validate(row))
+        parquet = pq.ParquetFile(project_dir / "data.parquet")
+        for batch in parquet.iter_batches(batch_size=16):
+            for row in batch.to_pylist():
+                patient = TcgaHfPatient.model_validate(row)
+                patients.append(patient.model_copy(update=_DATA_TYPE_FIELDS))
     return patients
 
 
@@ -52,12 +64,12 @@ def test_validate_every_row(all_patients: list[TcgaHfPatient]) -> None:
     assert all(p.case_submitter_id.startswith("TCGA-") for p in all_patients)
 
 
-def test_validation_throughput_is_reasonable(all_patients: list[TcgaHfPatient]) -> None:
+def test_validation_throughput_is_reasonable() -> None:
     """Re-validate a slice and confirm pydantic isn't slowing to a crawl with
     nested 60k-element gene vectors. Loose ceiling — we just want to catch
     20x regressions, not benchmark."""
-    sample = all_patients[: min(10, len(all_patients))]
-    payloads = [p.model_dump() for p in sample]
+    batch = next(pq.ParquetFile(PROCESSED / "TCGA-CHOL/data.parquet").iter_batches(batch_size=10))
+    payloads = batch.to_pylist()
     start = time.time()
     for payload in payloads:
         TcgaHfPatient.model_validate(payload)
@@ -195,7 +207,6 @@ def test_timeline_includes_every_dated_category(
         for ev in events:
             seen.add(ev.category)
 
-    # Categories that should appear in CHOL+DLBC
     for required in {"diagnosis", "treatment_start", "follow_up", "bcr_receipt", "death"}:
         assert required in seen, f"missing category {required}; saw {seen}"
 
