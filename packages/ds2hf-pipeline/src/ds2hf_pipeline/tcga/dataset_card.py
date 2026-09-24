@@ -333,7 +333,7 @@ Policy references:
 
 ## Disclaimer
 
-**This project is not affiliated with the NCI, GDC, or the TCGA Research Network.** It is an experimental open-source pipeline that may change significantly between versions. Pipeline source: [`galtay/tcga2hf`][repo].
+**This project is not affiliated with the NCI, GDC, or the TCGA Research Network.** It is an experimental open-source pipeline that may change significantly between versions. Pipeline source: [`galtay/ds2hf`][repo].
 """
 
 
@@ -343,7 +343,7 @@ _LINK_REFS = """\
 [gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
 [gdc-mrna]: https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/
 [gdc-sample-types]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/sample-type-codes
-[repo]: https://github.com/galtay/tcga2hf
+[repo]: https://github.com/galtay/ds2hf
 [patients]: https://huggingface.co/datasets/gabrielaltay/tcga-patients-open
 [tabular]: https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open
 """
@@ -1511,7 +1511,7 @@ _EXPRESSION_LINK_REFS = """\
 [gdc-barcode]: https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/
 [gdc-analyte-codes]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/portion-analyte-codes
 [gdc-center-codes]: https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/center-codes
-[repo]: https://github.com/galtay/tcga2hf
+[repo]: https://github.com/galtay/ds2hf
 """
 
 
@@ -1887,7 +1887,7 @@ _CDR_LINK_REFS = """\
 [gdc-api-data]: https://docs.gdc.cancer.gov/API/Users_Guide/Downloading_Files/#downloading-a-single-file-using-get
 [gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
 [dd-case]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=case&anchor=submitter_id
-[repo]: https://github.com/galtay/tcga2hf
+[repo]: https://github.com/galtay/ds2hf
 """
 
 

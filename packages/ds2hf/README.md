@@ -7,7 +7,7 @@ source. To produce or publish the datasets yourself, see
 ## Install
 
 ```bash
-pip install "ds2hf @ git+https://github.com/galtay/tcga2hf#subdirectory=packages/ds2hf"
+pip install "ds2hf @ git+https://github.com/galtay/ds2hf#subdirectory=packages/ds2hf"
 ```
 
 Dependencies are limited to `pyarrow`, `pydantic` and `huggingface-hub`.
@@ -83,10 +83,10 @@ Share this code, or the unmodified mirror.
 
 ## Source
 
-This package ships from the [`galtay/tcga2hf`][repo] monorepo; see the
+This package ships from the [`galtay/ds2hf`][repo] monorepo; see the
 repo for the build pipeline, dataset cards, and full documentation.
 
 [patients]: https://huggingface.co/datasets/gabrielaltay/tcga-patients-open
 [tabular]: https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open
-[repo]: https://github.com/galtay/tcga2hf
+[repo]: https://github.com/galtay/ds2hf
 [cc]: https://creativecommons.org/licenses/by-nc-nd/4.0/

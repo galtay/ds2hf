@@ -14,7 +14,7 @@ from ds2hf_pipeline.mskchord import source
 from ds2hf_pipeline.mskchord.build import ConfigInfo
 
 REPO_ID = "gabrielaltay/msk-chord-2024"
-GITHUB = "https://github.com/galtay/tcga2hf"
+GITHUB = "https://github.com/galtay/ds2hf"
 LOADER = f"{GITHUB}/tree/main/packages/ds2hf/src/ds2hf/mskchord"
 
 # Parquet files shipped but not declared as configs. The CNA matrix has one

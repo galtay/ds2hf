@@ -206,11 +206,11 @@ uv run pytest                                        # all (incl. network)
 
 ## Source
 
-This package ships from the [`galtay/tcga2hf`][repo] monorepo. Each
+This package ships from the [`galtay/ds2hf`][repo] monorepo. Each
 source writes its own dataset cards: `tcga/dataset_card.py` and
 `mskchord/card.py`.
 
 [patients]: https://huggingface.co/datasets/gabrielaltay/tcga-patients-open
 [tabular]: https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open
-[repo]: https://github.com/galtay/tcga2hf
+[repo]: https://github.com/galtay/ds2hf
 [license]: https://creativecommons.org/licenses/by-nc-nd/4.0/

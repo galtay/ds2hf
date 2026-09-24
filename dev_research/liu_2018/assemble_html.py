@@ -442,7 +442,7 @@ def main() -> None:
             </header>
 {body_html}
             <footer>Built from the
-                <a href="https://github.com/galtay/tcga2hf">tcga2hf</a> pipeline.
+                <a href="https://github.com/galtay/ds2hf">ds2hf</a> pipeline.
                 Source markdown lives in
                 <code>dev_research/liu_2018/sections/</code>.
             </footer>
