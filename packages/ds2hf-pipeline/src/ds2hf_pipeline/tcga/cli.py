@@ -41,23 +41,21 @@ app = typer.Typer(
     help="Download public TCGA data from the NCI GDC and stage it for the HF Hub.",
 )
 
-DEFAULT_DATA_DIR = Path.home() / "data" / "tcga2hf"
+DEFAULT_DATA_DIR = Path.home() / "data" / "ds2hf"
 
 
 def _resolve_data_dir(data_dir: Path | None) -> Path:
     if data_dir is not None:
         return data_dir
-    env = os.environ.get("TCGA2HF_DATA_DIR")
-    if env:
-        return Path(env).expanduser()
-    return DEFAULT_DATA_DIR
+    env = os.environ.get("DS2HF_DATA_DIR")
+    return (Path(env).expanduser() if env else DEFAULT_DATA_DIR) / "tcga"
 
 
 DataDirOpt = Annotated[
     Path | None,
     typer.Option(
         "--data-dir",
-        help="Root data dir. Defaults to $TCGA2HF_DATA_DIR or $HOME/data/tcga2hf.",
+        help="Root data dir. Defaults to $DS2HF_DATA_DIR/tcga or $HOME/data/ds2hf/tcga.",
     ),
 ]
 

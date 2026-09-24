@@ -31,10 +31,10 @@ from ds2hf.tcga.models import (
 )
 from pydantic import ValidationError
 
-PROCESSED = Path.home() / "data/tcga2hf/processed"
+PROCESSED = Path.home() / "data/ds2hf/tcga/processed_patient"
 LIVE_REQUIRED = pytest.mark.skipif(
     not (PROCESSED / "TCGA-CHOL/data.parquet").exists(),
-    reason="run `ds2hf-pipeline tcga build` first to populate $HOME/data/tcga2hf/processed",
+    reason="run `ds2hf-pipeline tcga build` first to populate the processed_patient tree",
 )
 
 
@@ -122,10 +122,11 @@ def test_pydantic_fields_match_pa_fields_exactly() -> None:
     field sets. If gdcdictionary adds/removes a field upstream, the pyarrow
     schema is regenerated; this test fails until pydantic catches up.
 
-    Designed-in exception: TcgaHfPatient declares `clinical_supplement` as
-    a flex `dict` field outside PATIENT_FIELDS because BCR biotab columns
-    vary by cancer type — they're inferred per project at parquet write
-    time rather than enumerated in the global schema.
+    Designed-in exception: TcgaHfPatient declares `clinical_supplement` and
+    `biospecimen_supplement` as flex `dict` fields outside PATIENT_FIELDS
+    because BCR biotab columns vary by cancer type — they're inferred per
+    project at parquet write time rather than enumerated in the global
+    schema.
     """
     # (cls, fields, extra_pyd_fields_intentionally_outside_schema)
     pairs: list[tuple[type, list, set[str]]] = [
@@ -142,7 +143,7 @@ def test_pydantic_fields_match_pa_fields_exactly() -> None:
         (Mutation, schema.MUTATION_FIELDS, set()),
         (GeneExpression, schema.EXPRESSION_FIELDS, set()),
         (PathologyReport, schema.PATHOLOGY_REPORT_FIELDS, set()),
-        (TcgaHfPatient, schema.PATIENT_FIELDS, {"clinical_supplement"}),
+        (TcgaHfPatient, schema.PATIENT_FIELDS, {"clinical_supplement", "biospecimen_supplement"}),
     ]
     for cls, fields, extras in pairs:
         pyd_names = set(cls.model_fields) - extras

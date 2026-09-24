@@ -23,7 +23,7 @@ default-groups = ["dev"]
 [tool.pytest.ini_options]
 markers = [
     "network: tests that hit the live GDC API (deselect with '-m \"not network\"')",
-    "integration: tests that read locally built parquets under $HOME/data/tcga2hf/processed (deselect with '-m \"not integration\"')",
+    "integration: tests that read locally built parquets under $HOME/data/ds2hf/tcga/processed_patient (deselect with '-m \"not integration\"')",
 ]
 testpaths = [
     "packages/ds2hf/tests",

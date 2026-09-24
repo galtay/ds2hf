@@ -1,4 +1,4 @@
-"""Row emitters for the tabular HF dataset (`tcga2hf-tabular-open`).
+"""Row emitters for the tabular HF dataset (`tcga-tabular-open`).
 
 Companion to `ds2hf_pipeline.tcga.clinical` (which produces the consolidated patient
 row with both clinical and molecular vectors nested). The tabular layout

@@ -751,7 +751,7 @@ def test_card_dictionary_links_resolve_to_real_gdc_fields() -> None:
 
     from ds2hf_pipeline.tcga.dataset_card import _EXPRESSION_DICTIONARY, _EXPRESSION_SOURCES
 
-    root = Path(os.environ.get("TCGA2HF_DATA_DIR", Path.home() / "data" / "tcga2hf"))
+    root = Path(os.environ.get("DS2HF_DATA_DIR", Path.home() / "data" / "ds2hf")) / "tcga"
     snapshots = sorted((root / "raw").glob("gdc_dictionary.*.json"))
     if not snapshots:
         pytest.skip("no GDC dictionary snapshot under the data dir")

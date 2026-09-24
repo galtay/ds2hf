@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path.home() / "data" / "tcga2hf",
+        default=Path.home() / "data" / "ds2hf" / "tcga",
         help="Root data dir (containing raw/<project>/cases.json and raw/cdr/).",
     )
     args = parser.parse_args()

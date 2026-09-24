@@ -32,13 +32,10 @@ wins over any inherited shell `HF_TOKEN`.
 
 ## Data location
 
-All data lives outside the repo, one root per source, overridable per
-command via `--data-dir`:
-
-| source | env var | default |
-|---|---|---|
-| `tcga` | `$TCGA2HF_DATA_DIR` | `$HOME/data/tcga2hf` |
-| `mskchord` | `$MSKCHORD2HF_DATA_DIR` | `$HOME/data/mskchord2hf` |
+All data lives outside the repo under one root, `$DS2HF_DATA_DIR`
+(default `$HOME/data/ds2hf`), with one subdirectory per source named after
+its module: `tcga/` and `mskchord/`. `--data-dir` overrides the source
+directory for a single command.
 
 Both sources' fetch steps are open access and need no auth.
 

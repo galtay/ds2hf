@@ -145,7 +145,7 @@ def main() -> None:
     parser.add_argument(
         "--raw",
         type=Path,
-        default=Path.home() / "data" / "tcga2hf" / "raw",
+        default=Path.home() / "data" / "ds2hf" / "tcga" / "raw",
         help="Path to <data-dir>/raw/ holding TCGA-*/cases.json + cdr/.",
     )
     args = parser.parse_args()

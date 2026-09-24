@@ -742,6 +742,10 @@ class TcgaHfPatient(_TcgaHfPatientBase):
     # pydantic to track the per-project columns dynamically.
     clinical_supplement: dict[str, Any] | None = None
 
+    # BCR Biospecimen Supplement biotabs, flex for the same reason. Every
+    # form is list-valued: `patient.biospecimen_supplement["sample"][i]`.
+    biospecimen_supplement: dict[str, Any] | None = None
+
     # ---- biospecimen joins ----
 
     def all_samples_by_id(self) -> dict[str, Sample]:

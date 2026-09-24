@@ -56,8 +56,8 @@ def main() -> None:
     ap.add_argument(
         "--data-dir",
         type=Path,
-        default=Path.home() / "data/tcga2hf",
-        help="Root data dir (default: $HOME/data/tcga2hf)",
+        default=Path.home() / "data/ds2hf/tcga",
+        help="Root data dir (default: $HOME/data/ds2hf/tcga)",
     )
     ap.add_argument(
         "--project",

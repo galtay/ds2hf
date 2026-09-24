@@ -31,7 +31,7 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
       # Every dataset in this project lives outside the repo under
-      # $TCGA2HF_DATA_DIR. A large file staged here means a parquet or a
+      # $DS2HF_DATA_DIR. A large file staged here means a parquet or a
       # raw GDC download has escaped .gitignore.
       - id: check-added-large-files
         args: [--maxkb=1024]
@@ -43,7 +43,7 @@ repos:
     hooks:
       # The offline suite runs in ~3 s, which is cheap enough to gate a
       # commit. Network and integration tests are deselected: they need the
-      # live GDC and a built tree under $TCGA2HF_DATA_DIR respectively, and
+      # live GDC and a built tree under $DS2HF_DATA_DIR respectively, and
       # neither belongs in a hook that must work on a plane.
       - id: pytest
         name: pytest (offline)

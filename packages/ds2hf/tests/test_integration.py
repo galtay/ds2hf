@@ -21,13 +21,13 @@ import pyarrow.parquet as pq
 import pytest
 from ds2hf.tcga.models import TcgaHfPatient
 
-PROCESSED = Path.home() / "data/tcga2hf/processed"
+PROCESSED = Path.home() / "data/ds2hf/tcga/processed_patient"
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
         not (PROCESSED / "TCGA-CHOL/data.parquet").exists(),
-        reason="run `ds2hf-pipeline tcga build` first to populate $HOME/data/tcga2hf/processed",
+        reason="run `ds2hf-pipeline tcga build` first to populate the processed_patient tree",
     ),
 ]
 

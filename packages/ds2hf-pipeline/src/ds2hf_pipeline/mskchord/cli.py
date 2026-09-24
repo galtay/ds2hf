@@ -16,13 +16,13 @@ app = typer.Typer(
     help="Mirror the MSK-CHORD cBioPortal study onto the HF Hub, format conversion only.",
 )
 
-DEFAULT_DATA_DIR = Path.home() / "data" / "mskchord2hf"
+DEFAULT_DATA_DIR = Path.home() / "data" / "ds2hf"
 
 DataDirOpt = Annotated[
     Path | None,
     typer.Option(
         "--data-dir",
-        help="Root data dir. Defaults to $MSKCHORD2HF_DATA_DIR or $HOME/data/mskchord2hf.",
+        help="Root data dir. Defaults to $DS2HF_DATA_DIR/mskchord or $HOME/data/ds2hf/mskchord.",
     ),
 ]
 
@@ -30,8 +30,8 @@ DataDirOpt = Annotated[
 def _data_dir(data_dir: Path | None) -> Path:
     if data_dir is not None:
         return data_dir
-    env = os.environ.get("MSKCHORD2HF_DATA_DIR")
-    return Path(env).expanduser() if env else DEFAULT_DATA_DIR
+    env = os.environ.get("DS2HF_DATA_DIR")
+    return (Path(env).expanduser() if env else DEFAULT_DATA_DIR) / "mskchord"
 
 
 def _report(checks: list[verify.Check]) -> list[str]:

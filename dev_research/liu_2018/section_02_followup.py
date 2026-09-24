@@ -29,7 +29,9 @@ from cohort import DAYS_PER_MONTH, ENDPOINTS, load_df, to_md
 HERE = Path(__file__).parent
 OUT = HERE / "sections" / "02_followup.md"
 LIU_CSV = HERE / "liu_table2.csv"
-CDR_XLSX = Path.home() / "data" / "tcga2hf" / "raw" / "cdr" / "TCGA-CDR-SupplementalTableS1.xlsx"
+CDR_XLSX = (
+    Path.home() / "data" / "ds2hf" / "tcga" / "raw" / "cdr" / "TCGA-CDR-SupplementalTableS1.xlsx"
+)
 
 TIME_COLS = (
     "FollowUp",
