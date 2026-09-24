@@ -979,22 +979,28 @@ def verify_cdr(processed_dir: Path) -> list[Check]:
 # TCGA patient folds.
 #
 # The dataset makes structural promises rather than copying a source: one
-# row per current TCGA patient, 5-fold nested in 10-fold, every row
-# reproducible from its own columns, and balance within each project.
+# row per current TCGA patient in both configs, in the same order, 5-fold
+# nested in 10-fold, every row reproducible from its own columns, and
+# balance within each project.
 # Balance is recounted here with pandas rather than trusted from the
 # builder's dealing arithmetic.
 # ---------------------------------------------------------------------------
 
 
 def _folds_frame(processed: Path) -> Any:
+    """Both configs side by side. Row alignment is what `check_folds_keys` verifies."""
     import pandas as pd
 
-    return pd.read_parquet(processed / "folds" / "data.parquet")
+    folds = pd.read_parquet(processed / "folds" / "data.parquet")
+    strata = pd.read_parquet(processed / "stratification" / "data.parquet")
+    return pd.concat([folds, strata.drop(columns="case_id")], axis=1)
 
 
 def check_folds_tree(processed: Path) -> Check:
     """Exactly the card and the one config: `upload_folder` publishes everything."""
-    expected = {Path("README.md"), Path("folds") / "data.parquet"}
+    from ds2hf_pipeline.tcga.folds import CONFIGS
+
+    expected = {Path("README.md"), *(Path(c) / "data.parquet" for c in CONFIGS)}
     present = {p.relative_to(processed) for p in processed.rglob("*") if p.is_file()}
     details = [f"  unexpected: {p}" for p in sorted(present - expected)]
     details += [f"  missing: {p}" for p in sorted(expected - present)]
@@ -1004,16 +1010,34 @@ def check_folds_tree(processed: Path) -> Check:
 
 
 def check_folds_keys(processed: Path) -> Check:
-    """One row per patient, well-formed values in every column."""
+    """One row per patient in each config, same patients in the same order, valid values."""
     import re
 
-    from ds2hf_pipeline.tcga.folds import COLUMNS, K_NESTED, LIU, REDERIVED, STATUSES, K
+    import pandas as pd
 
-    df = _folds_frame(processed)
+    from ds2hf_pipeline.tcga.folds import (
+        FOLDS_COLUMNS,
+        K_NESTED,
+        LIU,
+        REDERIVED,
+        STATUSES,
+        STRATIFICATION_COLUMNS,
+        K,
+    )
+
     details = []
-    if list(df.columns) != COLUMNS:
-        details.append(f"  columns {list(df.columns)}, expected {COLUMNS}")
+    frames = {}
+    for config, columns in (("folds", FOLDS_COLUMNS), ("stratification", STRATIFICATION_COLUMNS)):
+        frames[config] = pd.read_parquet(processed / config / "data.parquet")
+        if list(frames[config].columns) != columns:
+            details.append(
+                f"  {config}: columns {list(frames[config].columns)}, expected {columns}"
+            )
+    if details:
         return Check("keys", False, "wrong columns", details)
+    if not frames["folds"].case_id.equals(frames["stratification"].case_id):
+        return Check("keys", False, "configs are not row-aligned on case_id")
+    df = _folds_frame(processed)
     for key in ("case_id", "case_submitter_id"):
         if df[key].isna().any() or df[key].duplicated().any():
             details.append(f"  {key}: null or duplicated values")
@@ -1034,7 +1058,9 @@ def check_folds_keys(processed: Path) -> Check:
         extra = set(df[col].dropna().unique()) - allowed
         if extra or df[col].isna().any():
             details.append(f"  {col}: values outside {sorted(allowed)}: {sorted(extra)[:5]}")
-    return Check("keys", not details, f"{len(df):,} patients, one row each", details)
+    return Check(
+        "keys", not details, f"{len(df):,} patients, one row each, configs aligned", details
+    )
 
 
 def check_folds_nested(processed: Path) -> Check:

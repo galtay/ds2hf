@@ -19,6 +19,9 @@ current GDC records instead. `status_source` records which applies. The
 build reads the CDR workbook and, for the re-derivation, each project's
 `cases.json` plus its Clinical Supplements.
 
+The statuses ship in their own `stratification` config, apart from the
+folds, so nobody loading folds picks them up as training labels.
+
 Each build deals the current cohort afresh, so folds can change between
 releases as GDC adds patients or updates follow-up. A Hub revision pins
 one assignment; results should cite it.
@@ -43,16 +46,11 @@ STATUSES = ("event", "censored", "missing")
 LIU = "liu_2018"
 REDERIVED = "rederived"
 
-COLUMNS = [
-    "case_id",
-    "case_submitter_id",
-    "project_id",
-    "fold_10",
-    "fold_5",
-    "pfi_status",
-    "os_status",
-    "status_source",
-]
+# Two configs, one row per patient each, in the same order.
+FOLDS_COLUMNS = ["case_id", "case_submitter_id", "project_id", "fold_10", "fold_5"]
+STRATIFICATION_COLUMNS = ["case_id", "pfi_status", "os_status", "status_source"]
+CONFIGS = ("folds", "stratification")
+COLUMNS = FOLDS_COLUMNS + STRATIFICATION_COLUMNS[1:]
 
 
 def _hash(text: str) -> str:
@@ -138,23 +136,18 @@ def assign(cohort: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{c: row[c] for c in COLUMNS} for row in rows]
 
 
-def write(rows: list[dict[str, Any]], out_dir: Path) -> Path:
+def write(rows: list[dict[str, Any]], out_dir: Path) -> list[Path]:
+    """Write the `folds` and `stratification` configs; return their paths."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    schema = pa.schema(
-        [
-            ("case_id", pa.string()),
-            ("case_submitter_id", pa.string()),
-            ("project_id", pa.string()),
-            ("fold_10", pa.int8()),
-            ("fold_5", pa.int8()),
-            ("pfi_status", pa.string()),
-            ("os_status", pa.string()),
-            ("status_source", pa.string()),
-        ]
-    )
-    path = out_dir / "folds" / "data.parquet"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows, schema=schema), path)
-    return path
+    types = {"fold_10": pa.int8(), "fold_5": pa.int8()}
+    paths = []
+    for config, columns in (("folds", FOLDS_COLUMNS), ("stratification", STRATIFICATION_COLUMNS)):
+        schema = pa.schema([(c, types.get(c, pa.string())) for c in columns])
+        table = pa.Table.from_pylist([{c: r[c] for c in columns} for r in rows], schema=schema)
+        path = out_dir / config / "data.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, path)
+        paths.append(path)
+    return paths

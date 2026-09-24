@@ -2103,8 +2103,8 @@ def build_folds_cmd(
     if out_dir.exists():
         # One small table, rebuilt whole, so nothing stale survives.
         shutil.rmtree(out_dir)
-    path = folds.write(rows, out_dir)
-    typer.echo(f"  {len(rows):,} patients -> {path}")
+    for path in folds.write(rows, out_dir):
+        typer.echo(f"  {len(rows):,} patients -> {path}")
 
     releases = sorted(
         {

@@ -125,12 +125,23 @@ def test_card_reproduce_snippet_runs(tmp_path: Path) -> None:
     processed, card = _built(tmp_path)
     snippet = card.split("## Reproduce the assignment")[1].split("```python")[1].split("```")[0]
     frame = pd.read_parquet(processed / "folds" / "data.parquet")
+    strata = pd.read_parquet(processed / "stratification" / "data.parquet")
 
-    exec(snippet, {"folds": frame})
+    exec(snippet, {"folds": frame, "strata": strata})
 
     frame.loc[0, "fold_10"] = (frame.loc[0, "fold_10"] + 1) % folds.K
     with pytest.raises(AssertionError):
-        exec(snippet, {"folds": frame})
+        exec(snippet, {"folds": frame, "strata": strata})
+
+
+def test_folds_config_has_no_status_columns(tmp_path: Path) -> None:
+    """The default config must not offer anything that looks like a label."""
+    import pyarrow.parquet as pq
+
+    processed, _ = _built(tmp_path)
+    names = pq.read_schema(processed / "folds" / "data.parquet").names
+    assert names == folds.FOLDS_COLUMNS
+    assert not {"pfi_status", "os_status", "status_source"} & set(names)
 
 
 def test_folds_card_names_no_other_hub_dataset(tmp_path: Path) -> None:
@@ -167,3 +178,15 @@ def test_local_checks_catch_a_moved_patient_and_a_stray_file(tmp_path: Path) -> 
     assert not verify.check_folds_tree(processed).passed
     assert not verify.check_folds_nested(processed).passed
     assert not verify.check_folds_reproduce(processed).passed
+
+
+def test_keys_check_catches_misaligned_configs(tmp_path: Path) -> None:
+    import pandas as pd
+
+    processed, _ = _built(tmp_path)
+    path = processed / "stratification" / "data.parquet"
+    pd.read_parquet(path).iloc[::-1].to_parquet(path, index=False)
+
+    result = verify.check_folds_keys(processed)
+    assert not result.passed
+    assert "aligned" in result.summary

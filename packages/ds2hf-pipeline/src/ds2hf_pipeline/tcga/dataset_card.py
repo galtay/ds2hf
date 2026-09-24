@@ -2166,6 +2166,10 @@ configs:
     data_files:
       - split: train
         path: folds/data.parquet
+  - config_name: stratification
+    data_files:
+      - split: train
+        path: stratification/data.parquet
 ---
 """
 
@@ -2211,9 +2215,17 @@ train = folds[folds.fold_10 != 0]
 
 **`fold_5` nests inside `fold_10`.** `fold_5 = fold_10 % {K_NESTED}`, so each 5-fold fold is exactly two 10-fold folds, with the same balance.
 
-## Status columns
+## Stratification config
 
-**`pfi_status` and `os_status` are the values used for balancing.** Each is `event`, `censored` or `missing`. They are not meant as training labels: take endpoints from the source your analysis uses.
+**The balancing variables are in a separate config.** `stratification` has one row per patient, in the same order as `folds`, with the survival status each patient was balanced on. Load it to check the balance or reproduce the assignment:
+
+```python
+strata = load_dataset(
+    "{repo_id}", "stratification", split="train", revision="<commit sha>"
+).to_pandas()
+```
+
+**The statuses are not training labels.** `pfi_status` and `os_status` are `event`, `censored` or `missing`, with no event times, and mix two sources. Take endpoints from the source your analysis uses.
 
 **Status comes from Liu et al. 2018 where it covers the patient.** Most TCGA survival work uses the endpoints of the [TCGA Pan-Cancer Clinical Data Resource][liu] (TCGA-CDR), so folds balance on those. `status_source` is `liu_2018` for these patients.
 
@@ -2235,7 +2247,7 @@ train = folds[folds.fold_10 != 0]
 
 ## Reproduce the assignment
 
-**Every row follows from its own columns.** Within each project, sort by PFI status, OS status, then a salted hash of `case_id`, and deal round-robin from a per-project offset:
+**Every fold follows from the stratification columns.** Within each project, sort by PFI status, OS status, then a salted hash of `case_id`, and deal round-robin from a per-project offset:
 
 ```python
 import hashlib
@@ -2246,7 +2258,7 @@ ORDER = ["event", "censored", "missing"]
 def h(text):
     return hashlib.sha256(f"{{SALT}}:{{text}}".encode()).hexdigest()
 
-rows = folds.copy()
+rows = folds.merge(strata, on="case_id")
 rows["key"] = [
     (ORDER.index(p), ORDER.index(o), h(c))
     for p, o, c in zip(rows.pfi_status, rows.os_status, rows.case_id)
@@ -2261,6 +2273,8 @@ The builder is [`folds.py`][folds-py].
 
 ## Columns
 
+**`folds`:**
+
 | column | meaning |
 |---|---|
 | `case_id` | GDC case UUID |
@@ -2268,6 +2282,12 @@ The builder is [`folds.py`][folds-py].
 | `project_id` | GDC project, such as `TCGA-BRCA` |
 | `fold_10` | fold for 10-fold cross validation, 0-{K - 1} |
 | `fold_5` | fold for 5-fold cross validation, 0-{K_NESTED - 1}; `fold_10 % {K_NESTED}` |
+
+**`stratification`:**
+
+| column | meaning |
+|---|---|
+| `case_id` | GDC case UUID |
 | `pfi_status` | PFI status used for balancing: `event`, `censored` or `missing` |
 | `os_status` | OS status used for balancing: `event`, `censored` or `missing` |
 | `status_source` | `liu_2018` or `rederived` |
