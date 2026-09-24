@@ -12,6 +12,8 @@ dev = [
 [tool.uv.sources]
 tcga2hf = { workspace = true }
 tcga2hf-pipeline = { workspace = true }
+mskchord2hf = { workspace = true }
+mskchord2hf-pipeline = { workspace = true }
 
 # Default workspace install pulls in both members so `uv sync` at the repo
 # root gets a fully-functional dev environment (consumer types + producer
@@ -28,6 +30,8 @@ markers = [
 testpaths = [
     "packages/tcga2hf/tests",
     "packages/tcga2hf-pipeline/tests",
+    "packages/mskchord2hf/tests",
+    "packages/mskchord2hf-pipeline/tests",
 ]
 
 [tool.ruff]
@@ -45,6 +49,7 @@ select = ["E", "F", "I", "B", "UP"]
 # cannot be split across source lines without ceasing to be a table row,
 # and the rendered card is what readers see, not this file.
 "packages/tcga2hf-pipeline/src/tcga2hf_pipeline/dataset_card.py" = ["E501"]
+"packages/mskchord2hf-pipeline/src/mskchord2hf_pipeline/card.py" = ["E501"]
 # The Liu 2018 research scripts are narrative: long prose strings and wide
 # printed tables, written to be read as a report rather than maintained as
 # a library. They still get F/B/I/UP, which catch real defects.
