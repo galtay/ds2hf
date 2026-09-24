@@ -2090,3 +2090,202 @@ Cite the paper when you use this dataset:
     out_path = out_dir / "README.md"
     out_path.write_text(frontmatter + body)
     return out_path
+
+
+# ===========================================================================
+# TCGA patient cross-validation folds card
+# ===========================================================================
+
+FOLDS_REPO_ID = "gabrielaltay/tcga-patient-folds"
+
+# Standalone like the CDR card: GDC, the paper and the pipeline source only.
+_FOLDS_LINK_REFS = """\
+[liu]: https://doi.org/10.1016/j.cell.2018.02.052
+[gdc-dict]: https://docs.gdc.cancer.gov/Data_Dictionary/
+[dd-case-id]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=case&anchor=case_id
+[dd-case]: https://docs.gdc.cancer.gov/Data_Dictionary/viewer/#?view=table-definition-view&id=case&anchor=submitter_id
+[folds-py]: https://github.com/galtay/ds2hf/blob/main/packages/ds2hf-pipeline/src/ds2hf_pipeline/tcga/folds.py
+[survival-py]: https://github.com/galtay/ds2hf/blob/main/packages/ds2hf-pipeline/src/ds2hf_pipeline/tcga/survival.py
+[repo]: https://github.com/galtay/ds2hf
+"""
+
+# Fewer events than this in a test fold make a per-fold, per-project
+# survival metric noise. The card flags those cells.
+FOLDS_MIN_EVENTS = 5
+
+
+def _folds_events_table(rows: list[dict[str, Any]]) -> str:
+    """Per project: patients, events, and mean events per test fold at each k."""
+    from collections import Counter
+
+    from ds2hf_pipeline.tcga.folds import K_NESTED, K
+
+    patients = Counter(r["project_id"] for r in rows)
+    pfi = Counter(r["project_id"] for r in rows if r["pfi_status"] == "event")
+    os_ = Counter(r["project_id"] for r in rows if r["os_status"] == "event")
+
+    def cell(events: int, k: int) -> str:
+        mean = events / k
+        return f"**{mean:.1f}**" if mean < FOLDS_MIN_EVENTS else f"{mean:.1f}"
+
+    lines = [
+        f"| project | patients | PFI events | OS events | PFI / fold ({K}) | PFI / fold ({K_NESTED}) "
+        f"| OS / fold ({K}) | OS / fold ({K_NESTED}) |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for project in sorted(patients, key=lambda p: (pfi[p], p)):
+        lines.append(
+            f"| {project} | {patients[project]} | {pfi[project]} | {os_[project]} "
+            f"| {cell(pfi[project], K)} | {cell(pfi[project], K_NESTED)} "
+            f"| {cell(os_[project], K)} | {cell(os_[project], K_NESTED)} |"
+        )
+    return "\n".join(lines)
+
+
+def write_folds_card(out_dir: Path, rows: list[dict[str, Any]], gdc_releases: list[str]) -> Path:
+    """Write the card for the TCGA patient cross-validation folds dataset."""
+    from ds2hf_pipeline.tcga.folds import K_NESTED, SALT, K
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    repo_id = FOLDS_REPO_ID
+    n_projects = len({r["project_id"] for r in rows})
+    release = ", ".join(gdc_releases) or "<unknown>"
+
+    frontmatter = """---
+license: other
+license_name: nih-genomic-data-sharing
+license_link: https://gdc.cancer.gov/analyze-data/data-analysis-policies
+pretty_name: TCGA Patient Cross-Validation Folds
+tags:
+  - cancer
+  - tcga
+  - survival-analysis
+  - cross-validation
+configs:
+  - config_name: folds
+    data_files:
+      - split: train
+        path: folds/data.parquet
+---
+"""
+
+    body = "\n".join(
+        [
+            f"""\
+# TCGA Patient Cross-Validation Folds
+
+A standard assignment of The Cancer Genome Atlas (TCGA) patients to cross-validation folds. A *fold* is one of the equal parts a cohort is split into; each fold serves once as the test set while the others train.
+
+- **Size:** {len(rows):,} patients in {n_projects} TCGA projects
+- **Cohort:** every TCGA case at GDC, {release}
+- **Built:** {timestamp}
+
+## Load it
+
+```python
+from datasets import load_dataset
+
+folds = load_dataset(
+    "{repo_id}", "folds", split="train", revision="<commit sha>"
+).to_pandas()
+
+test = folds[folds.fold_10 == 0]
+train = folds[folds.fold_10 != 0]
+```
+
+**Pin a revision.** Each upload to the Hub is a commit, and folds can differ between commits. Load and cite a commit sha so others can reproduce your split.
+
+**Join on `case_id`.** It is the GDC [case UUID][dd-case-id]. `case_submitter_id` is the TCGA patient barcode, the GDC case [`submitter_id`][dd-case].
+
+**Sample-level data joins through its patient.** Map each sample, aliquot or slide to its GDC case, then take that case's fold.
+
+## Folds split patients, not samples
+
+**Every sample of a patient is in the same fold.** Many patients have several samples, such as tumour and normal tissue. Splitting samples would put one patient on both sides and leak into the test score.
+
+## Folds are balanced within each project
+
+**Each project spreads evenly across folds.** Fold sizes within a project differ by at most one patient.
+
+**Survival status is balanced too.** Within each project, patients are ordered by progression-free interval (PFI) status, then overall survival (OS) status, before being dealt to folds. Each PFI status differs by at most one patient across folds; OS events by at most three.
+
+**`fold_5` nests inside `fold_10`.** `fold_5 = fold_10 % {K_NESTED}`, so each 5-fold fold is exactly two 10-fold folds, with the same balance.
+
+## Status columns
+
+**`pfi_status` and `os_status` are the values used for balancing.** Each is `event`, `censored` or `missing`. They are not meant as training labels: take endpoints from the source your analysis uses.
+
+**Status comes from Liu et al. 2018 where it covers the patient.** Most TCGA survival work uses the endpoints of the [TCGA Pan-Cancer Clinical Data Resource][liu] (TCGA-CDR), so folds balance on those. `status_source` is `liu_2018` for these patients.
+
+**Other patients use re-derived endpoints.** Patients GDC added after Liu et al.'s 2018 freeze, and those Liu et al. mark redacted, take OS and PFI [re-derived][survival-py] from current GDC records with Liu et al.'s definitions. `status_source` is `rederived`.
+
+## Small projects have few events per fold
+
+**Evaluate small projects on pooled predictions.** A test fold with few events gives a noisy survival metric. Collect every patient's out-of-fold prediction and compute one metric per project over all of them.
+
+**Five folds doubles the events per test fold.** It is not enough for every project. Bold cells below average fewer than {FOLDS_MIN_EVENTS} events per test fold.
+
+{_folds_events_table(rows)}
+
+**Some endpoints do not apply to some cancers.** Leukaemia (LAML) has no progression events, for example. Table 3 of [Liu et al.][liu] recommends endpoints per cancer type.
+
+## Folds change between revisions
+
+**Each revision deals the current cohort afresh.** New GDC patients and changed survival status reorder the dealing, so many patients can change fold between revisions.
+
+## Reproduce the assignment
+
+**Every row follows from its own columns.** Within each project, sort by PFI status, OS status, then a salted hash of `case_id`, and deal round-robin from a per-project offset:
+
+```python
+import hashlib
+
+SALT = "{SALT}"
+ORDER = ["event", "censored", "missing"]
+
+def h(text):
+    return hashlib.sha256(f"{{SALT}}:{{text}}".encode()).hexdigest()
+
+rows = folds.copy()
+rows["key"] = [
+    (ORDER.index(p), ORDER.index(o), h(c))
+    for p, o, c in zip(rows.pfi_status, rows.os_status, rows.case_id)
+]
+rows = rows.sort_values(["project_id", "key"])
+position = rows.groupby("project_id").cumcount()
+offset = rows.project_id.map(lambda p: int(h(p), 16) % {K})
+assert ((position + offset) % {K} == rows.fold_10).all()
+```
+
+The builder is [`folds.py`][folds-py].
+
+## Columns
+
+| column | meaning |
+|---|---|
+| `case_id` | GDC case UUID |
+| `case_submitter_id` | TCGA patient barcode |
+| `project_id` | GDC project, such as `TCGA-BRCA` |
+| `fold_10` | fold for 10-fold cross validation, 0-{K - 1} |
+| `fold_5` | fold for 5-fold cross validation, 0-{K_NESTED - 1}; `fold_10 % {K_NESTED}` |
+| `pfi_status` | PFI status used for balancing: `event`, `censored` or `missing` |
+| `os_status` | OS status used for balancing: `event`, `censored` or `missing` |
+| `status_source` | `liu_2018` or `rederived` |
+
+## Citation
+
+Cite the TCGA-CDR paper when you rely on the survival balance:
+
+> Liu J, Lichtenberg T, Hoadley KA, et al. An Integrated TCGA Pan-Cancer Clinical Data Resource to Drive High-Quality Survival Outcome Analytics. *Cell*. 2018;173(2):400-416.e11. doi:10.1016/j.cell.2018.02.052
+""",
+            # Joined, not concatenated: see write_expression_card.
+            _gdc_references("barcode", "dictionary"),
+            _LICENSE_AND_REDISTRIBUTION,
+            _FOLDS_LINK_REFS,
+        ]
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "README.md"
+    out_path.write_text(frontmatter + body)
+    return out_path

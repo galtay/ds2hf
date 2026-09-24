@@ -973,3 +973,179 @@ def verify_cdr(processed_dir: Path) -> list[Check]:
     with GDCClient() as client:
         checks.append(check_cdr_cases_at_gdc(client, processed_dir))
     return checks
+
+
+# ---------------------------------------------------------------------------
+# TCGA patient folds.
+#
+# The dataset makes structural promises rather than copying a source: one
+# row per current TCGA patient, 5-fold nested in 10-fold, every row
+# reproducible from its own columns, and balance within each project.
+# Balance is recounted here with pandas rather than trusted from the
+# builder's dealing arithmetic.
+# ---------------------------------------------------------------------------
+
+
+def _folds_frame(processed: Path) -> Any:
+    import pandas as pd
+
+    return pd.read_parquet(processed / "folds" / "data.parquet")
+
+
+def check_folds_tree(processed: Path) -> Check:
+    """Exactly the card and the one config: `upload_folder` publishes everything."""
+    expected = {Path("README.md"), Path("folds") / "data.parquet"}
+    present = {p.relative_to(processed) for p in processed.rglob("*") if p.is_file()}
+    details = [f"  unexpected: {p}" for p in sorted(present - expected)]
+    details += [f"  missing: {p}" for p in sorted(expected - present)]
+    return Check(
+        "tree_clean", not details, f"{len(present)} files, {len(expected)} expected", details
+    )
+
+
+def check_folds_keys(processed: Path) -> Check:
+    """One row per patient, well-formed values in every column."""
+    import re
+
+    from ds2hf_pipeline.tcga.folds import COLUMNS, K_NESTED, LIU, REDERIVED, STATUSES, K
+
+    df = _folds_frame(processed)
+    details = []
+    if list(df.columns) != COLUMNS:
+        details.append(f"  columns {list(df.columns)}, expected {COLUMNS}")
+        return Check("keys", False, "wrong columns", details)
+    for key in ("case_id", "case_submitter_id"):
+        if df[key].isna().any() or df[key].duplicated().any():
+            details.append(f"  {key}: null or duplicated values")
+    bad_barcode = ~df.case_submitter_id.fillna("").str.match(_PATIENT_BARCODE)
+    if bad_barcode.any():
+        details.append(
+            f"  malformed barcodes, e.g. {df.case_submitter_id[bad_barcode].head(3).tolist()}"
+        )
+    if not df.project_id.fillna("").map(lambda p: bool(re.match(r"^TCGA-[A-Z]+$", p))).all():
+        details.append("  malformed project_id")
+    for col, allowed in (
+        ("fold_10", set(range(K))),
+        ("fold_5", set(range(K_NESTED))),
+        ("pfi_status", set(STATUSES)),
+        ("os_status", set(STATUSES)),
+        ("status_source", {LIU, REDERIVED}),
+    ):
+        extra = set(df[col].dropna().unique()) - allowed
+        if extra or df[col].isna().any():
+            details.append(f"  {col}: values outside {sorted(allowed)}: {sorted(extra)[:5]}")
+    return Check("keys", not details, f"{len(df):,} patients, one row each", details)
+
+
+def check_folds_nested(processed: Path) -> Check:
+    """Each 5-fold fold is exactly two 10-fold folds."""
+    from ds2hf_pipeline.tcga.folds import K_NESTED
+
+    df = _folds_frame(processed)
+    bad = df[df.fold_5 != df.fold_10 % K_NESTED]
+    return Check(
+        "nested",
+        bad.empty,
+        "fold_5 == fold_10 % 5 on every row" if bad.empty else f"{len(bad)} rows break nesting",
+        [
+            f"  {r.case_submitter_id}: fold_10={r.fold_10} fold_5={r.fold_5}"
+            for r in bad.head(5).itertuples()
+        ],
+    )
+
+
+def check_folds_reproduce(processed: Path) -> Check:
+    """Dealing the rows again, from their own columns, gives their folds."""
+    from ds2hf_pipeline.tcga.folds import deal
+
+    df = _folds_frame(processed)
+    dealt = deal(df[["case_id", "project_id", "pfi_status", "os_status"]].to_dict("records"))
+    differ = df[df.case_id.map(dealt) != df.fold_10]
+    return Check(
+        "reproduces",
+        differ.empty,
+        f"{len(df) - len(differ):,} of {len(df):,} rows re-deal to their fold",
+        [
+            f"  {r.case_submitter_id}: published {r.fold_10}, re-dealt {dealt[r.case_id]}"
+            for r in differ.head(5).itertuples()
+        ],
+    )
+
+
+def _worst_spread(df: Any, fold: str, k: int, by: list[str]) -> tuple[int, str]:
+    """Largest max-min patient count across folds within any `by` group."""
+    import pandas as pd
+
+    counts = pd.crosstab([df[c] for c in by], df[fold]).reindex(columns=range(k), fill_value=0)
+    spread = counts.max(axis=1) - counts.min(axis=1)
+    return int(spread.max()), str(spread.idxmax())
+
+
+def check_folds_balance(processed: Path) -> Check:
+    """Within each project, folds differ by at most one patient, overall and per PFI status.
+
+    OS is the second sort key, so its events run in up to three contiguous
+    stretches, one per PFI status, and may differ by up to three.
+    """
+    from ds2hf_pipeline.tcga.folds import K_NESTED, K
+
+    df = _folds_frame(processed)
+    limits = [
+        ("patients", df, ["project_id"], 1),
+        ("PFI status", df, ["project_id", "pfi_status"], 1),
+        ("OS events", df[df.os_status == "event"], ["project_id"], 3),
+    ]
+    details, summary = [], []
+    for fold, k in (("fold_10", K), ("fold_5", K_NESTED)):
+        for label, frame, by, limit in limits:
+            worst, where = _worst_spread(frame, fold, k, by)
+            summary.append(f"{fold} {label} ±{worst}")
+            if worst > limit:
+                details.append(f"  {fold} {label}: spread {worst} > {limit} in {where}")
+    return Check("balance", not details, ", ".join(summary), details)
+
+
+def check_folds_cases_at_gdc(client: GDCClient, processed: Path) -> Check:
+    """The table is exactly GDC's current TCGA cases, with matching barcode and project.
+
+    Both directions fail: a missing case would have no fold, and a case GDC
+    dropped would leave a row nothing can join to.
+    """
+    df = _folds_frame(processed)
+    hits = client.cases(
+        filters=eq("project.program.name", "TCGA"),
+        fields=["case_id", "submitter_id", "project.project_id"],
+        page_size=5000,
+    )
+    remote = {h["case_id"]: (h["submitter_id"], h["project"]["project_id"]) for h in hits}
+    ours = {r.case_id: (r.case_submitter_id, r.project_id) for r in df.itertuples()}
+    missing = sorted(set(remote) - set(ours))
+    extra = sorted(set(ours) - set(remote))
+    mismatched = sorted(c for c in set(ours) & set(remote) if ours[c] != remote[c])
+    details = []
+    if missing:
+        details.append(f"  {len(missing)} GDC case(s) absent here: {missing[:3]}")
+    if extra:
+        details.append(f"  {len(extra)} case(s) here but not at GDC: {extra[:3]}")
+    if mismatched:
+        details.append(f"  {len(mismatched)} barcode/project mismatch(es): {mismatched[:3]}")
+    return Check(
+        "cases_at_gdc",
+        not details,
+        f"{len(ours):,} patients here, {len(remote):,} TCGA cases at GDC",
+        details,
+    )
+
+
+def verify_folds(processed_dir: Path) -> list[Check]:
+    """Run every folds check. Local ones first, then the network."""
+    checks = [
+        check_folds_tree(processed_dir),
+        check_folds_keys(processed_dir),
+        check_folds_nested(processed_dir),
+        check_folds_reproduce(processed_dir),
+        check_folds_balance(processed_dir),
+    ]
+    with GDCClient() as client:
+        checks.append(check_folds_cases_at_gdc(client, processed_dir))
+    return checks

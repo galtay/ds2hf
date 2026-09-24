@@ -19,6 +19,7 @@ from ds2hf_pipeline.tcga import (
     copy_number,
     dataset_card,
     expression,
+    folds,
     gene_expression_quantification,
     genomic,
     mirna,
@@ -2068,6 +2069,102 @@ def upload_cdr_cmd(
         repo_id=repo_id,
         private=private,
         commit_message=commit_message or "Update TCGA-CDR (Liu et al. 2018) dataset",
+    )
+    typer.echo(f"\nuploaded -> {url}")
+
+
+def _report_checks(checks: list[verify.Check]) -> list[str]:
+    for check in checks:
+        typer.echo(f"[{'PASS' if check.passed else 'FAIL'}] {check.name}: {check.summary}")
+        if not check.passed:
+            for line in check.details:
+                typer.echo(line)
+    return [c.name for c in checks if not c.passed]
+
+
+@app.command("build-folds")
+def build_folds_cmd(
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Build the TCGA patient cross-validation folds dataset.
+
+    Writes `<data-dir>/processed_folds/`: one row per TCGA patient with a
+    10-fold and a nested 5-fold assignment, balanced within each project on
+    PFI then OS status. Reads raw `cases.json`, Clinical Supplements and the
+    CDR workbook. Each build deals the current cohort afresh.
+    """
+    root = _resolve_data_dir(data_dir)
+    raw_dir = root / "raw"
+    out_dir = root / "processed_folds"
+    typer.echo(f"raw dir: {raw_dir}")
+    typer.echo(f"output:  {out_dir}")
+
+    rows = folds.assign(folds.load_cohort(raw_dir))
+    if out_dir.exists():
+        # One small table, rebuilt whole, so nothing stale survives.
+        shutil.rmtree(out_dir)
+    path = folds.write(rows, out_dir)
+    typer.echo(f"  {len(rows):,} patients -> {path}")
+
+    releases = sorted(
+        {
+            json.loads(p.read_text()).get("data_release", "<unknown>")
+            for p in raw_dir.glob("TCGA-*/gdc_status.json")
+        }
+    )
+    card = dataset_card.write_folds_card(out_dir, rows, releases)
+    typer.echo(f"\nwrote dataset card -> {card}")
+    typer.echo("verify with: ds2hf-pipeline tcga verify-folds")
+
+
+@app.command("verify-folds")
+def verify_folds_cmd(
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Check the built folds: structure, nesting, reproducibility, balance, and GDC coverage.
+
+    Exits non-zero if any check fails.
+    """
+    processed_dir = _resolve_data_dir(data_dir) / "processed_folds"
+    typer.echo("verifying the folds dataset\n")
+    failed = _report_checks(verify.verify_folds(processed_dir))
+    typer.echo("")
+    if failed:
+        typer.echo(f"{len(failed)} check(s) failed: {', '.join(failed)}")
+        raise typer.Exit(code=1)
+    typer.echo("all checks passed")
+
+
+@app.command("upload-folds")
+def upload_folds_cmd(
+    repo_id: Annotated[
+        str, typer.Option("--repo-id", help="HF dataset repo id.")
+    ] = dataset_card.FOLDS_REPO_ID,
+    private: Annotated[
+        bool, typer.Option("--private/--public", help="Upload as private, or public.")
+    ] = False,
+    commit_message: Annotated[
+        str | None, typer.Option("--commit-message", "-m", help="Commit message.")
+    ] = None,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Verify `<data-dir>/processed_folds/`, then push it to HF Hub.
+
+    Always verifies first. Each upload is a new Hub revision; folds may differ
+    from the previous one, which is why the card asks users to pin a revision.
+    """
+    processed_dir = _resolve_data_dir(data_dir) / "processed_folds"
+    typer.echo(f"processed dir: {processed_dir}")
+    typer.echo(f"repo_id:       {repo_id} ({'private' if private else 'PUBLIC'})\n")
+    failed = _report_checks(verify.verify_folds(processed_dir))
+    if failed:
+        raise typer.BadParameter(f"not uploading: {', '.join(failed)} failed.")
+
+    url = hf_upload.upload_dataset(
+        processed_dir=processed_dir,
+        repo_id=repo_id,
+        private=private,
+        commit_message=commit_message or "Update TCGA patient folds",
     )
     typer.echo(f"\nuploaded -> {url}")
 
