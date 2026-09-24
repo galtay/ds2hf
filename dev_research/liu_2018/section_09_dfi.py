@@ -99,7 +99,7 @@ Event AND time agree (within 0.5 days).
 
 ### Implication
 
-DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use `cdr_DFI` filtered to `cdr_matched=True`. Where you want the broadest coverage including post-2018 patients, use `dfi_event` / `dfi_time` and accept the residual ~150 patient gap from Liu's own values.
+DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use `DFI` / `DFI.time` from `gabrielaltay/tcga-pancanatlas-cdr`. Where you want the broadest coverage including post-2018 patients, use `dfi_event` / `dfi_time` and accept the residual ~150 patient gap from Liu's own values.
 
 Causal summary of the remaining ~1.1% disagreement when both populated:
 - **About half is data drift** — modern GDC has re-curated, lost, or updated BCR timestamps that Liu had in 2018 (irrecoverable without a 2018 GDC snapshot).

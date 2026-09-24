@@ -25,10 +25,10 @@ OUT = HERE / "report.html"
 INTRO_MD = """\
 Liu et al. curated four survival endpoints — Overall Survival (OS), Disease-Specific Survival (DSS), Disease-Free Interval (DFI), and Progression-Free Interval (PFI) — for 11,160 TCGA patients across 33 cancer types. Their result is the canonical *TCGA-CDR* table, frozen at a 2018 data freeze.
 
-Our `tcga2hf` pipeline ships **two parallel streams** of survival annotation on every patient row:
+This report compares two sources of the same four endpoints:
 
-1. **`cdr_*` (curated, frozen)** — Liu's values lifted verbatim from `TCGA-CDR-SupplementalTableS1.xlsx`. Direct reproducibility; ~268 of our 11,428 patients post-date Liu's freeze and have no CDR row.
-2. **`{os,dss,pfi,dfi}_event` / `_time` (re-derived, live)** — the same four endpoints recomputed from the current GDC data using Liu's documented algorithm (`ds2hf_pipeline.tcga.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements.
+1. **Liu's values (curated, frozen)** — verbatim from `TCGA-CDR-SupplementalTableS1.xlsx`. Published as-is in [`gabrielaltay/tcga-pancanatlas-cdr`](https://huggingface.co/datasets/gabrielaltay/tcga-pancanatlas-cdr). Throughout this report they appear as `cdr_OS`, `cdr_OS_time`, etc.; that prefix exists only in the report's working cache, not in any published dataset. ~268 of our 11,428 patients post-date Liu's freeze and have no CDR row.
+2. **Our re-derived values (live)** — `{os,dss,pfi,dfi}_event` / `_time`, recomputed from current GDC data using Liu's documented algorithm (`ds2hf_pipeline.tcga.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements. Published in the `survival_derived` struct of `gabrielaltay/tcga-patients-open` and the `survival_derived` table of `gabrielaltay/tcga-tabular-open`.
 
 This report walks through three things:
 

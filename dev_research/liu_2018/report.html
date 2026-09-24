@@ -269,7 +269,7 @@ footer {
         <li><a href="#section-8-pfi-deep-dive-961-match-past-liursquos-reliability-bar">Section 8 — PFI deep-dive (96.1% match — past Liu&rsquo;s reliability bar)</a></li>
         <li><a href="#section-9-dfi-deep-dive-the-hardest-endpoint">Section 9 — DFI deep-dive (the hardest endpoint)</a></li>
         <li><a href="#section-10-extension-beyond-liu-post-2018-coverage">Section 10 — Extension beyond Liu (post-2018 coverage)</a></li>
-        <li><a href="#section-11-how-to-use-the-two-streams-in-practice">Section 11 — How to use the two streams in practice</a></li>
+        <li><a href="#section-11-which-survival-values-to-use">Section 11 — Which survival values to use</a></li>
         <li><a href="#conclusions">Conclusions</a></li>
     </ol>
 </nav>
@@ -278,15 +278,15 @@ footer {
             <header>
                 <h1>Reproducing Liu et al. 2018 — TCGA Pan-Cancer Clinical Data Resource</h1>
                 <p class="subtitle">Liu J, Lichtenberg T, Hoadley KA, et al. <em>An Integrated TCGA Pan-Cancer Clinical Data Resource to Drive High-Quality Survival Outcome Analytics.</em> <strong>Cell</strong> 173(2):400–416 (2018). <a href="https://doi.org/10.1016/j.cell.2018.02.052">DOI 10.1016/j.cell.2018.02.052</a></p>
-                <p class="meta">Rendered 2026-05-09 01:15 UTC from
+                <p class="meta">Rendered 2026-09-24 03:38 UTC from
                     <code>dev_research/liu_2018/sections/*.md</code> via
                     <code>assemble_html.py</code>.</p>
             </header>
 <p>Liu et al. curated four survival endpoints — Overall Survival (OS), Disease-Specific Survival (DSS), Disease-Free Interval (DFI), and Progression-Free Interval (PFI) — for 11,160 TCGA patients across 33 cancer types. Their result is the canonical <em>TCGA-CDR</em> table, frozen at a 2018 data freeze.</p>
-<p>Our <code>tcga2hf</code> pipeline ships <strong>two parallel streams</strong> of survival annotation on every patient row:</p>
+<p>This report compares two sources of the same four endpoints:</p>
 <ol>
-<li><strong><code>cdr_*</code> (curated, frozen)</strong> — Liu&rsquo;s values lifted verbatim from <code>TCGA-CDR-SupplementalTableS1.xlsx</code>. Direct reproducibility; ~268 of our 11,428 patients post-date Liu&rsquo;s freeze and have no CDR row.</li>
-<li><strong><code>{os,dss,pfi,dfi}_event</code> / <code>_time</code> (re-derived, live)</strong> — the same four endpoints recomputed from the current GDC data using Liu&rsquo;s documented algorithm (<code>tcga2hf_pipeline.survival</code>), augmented with <code>treatment_outcome_first_course</code> from the BCR biotab Clinical Supplements.</li>
+<li><strong>Liu&rsquo;s values (curated, frozen)</strong> — verbatim from <code>TCGA-CDR-SupplementalTableS1.xlsx</code>. Published as-is in <a href="https://huggingface.co/datasets/gabrielaltay/tcga-pancanatlas-cdr"><code>gabrielaltay/tcga-pancanatlas-cdr</code></a>. Throughout this report they appear as <code>cdr_OS</code>, <code>cdr_OS_time</code>, etc.; that prefix exists only in the report&rsquo;s working cache, not in any published dataset. ~268 of our 11,428 patients post-date Liu&rsquo;s freeze and have no CDR row.</li>
+<li><strong>Our re-derived values (live)</strong> — <code>{os,dss,pfi,dfi}_event</code> / <code>_time</code>, recomputed from current GDC data using Liu&rsquo;s documented algorithm (<code>ds2hf_pipeline.tcga.survival</code>), augmented with <code>treatment_outcome_first_course</code> from the BCR biotab Clinical Supplements. Published in the <code>survival_derived</code> struct of <code>gabrielaltay/tcga-patients-open</code> and the <code>survival_derived</code> table of <code>gabrielaltay/tcga-tabular-open</code>.</li>
 </ol>
 <p>This report walks through three things:</p>
 <ul>
@@ -1845,7 +1845,7 @@ footer {
 <td>34.7</td>
 <td>10.0</td>
 <td>32.7</td>
-<td>11.0</td>
+<td>11.3</td>
 <td>35.9</td>
 </tr>
 <tr>
@@ -2036,7 +2036,7 @@ footer {
 <li><strong>One Alive-then-Dead patient with no death date</strong> — used the enrollment-file Alive value.</li>
 <li><strong>One OV with grade 4</strong> — invalid grade for OV but kept as-is.</li>
 </ol>
-<p>Our <code>tcga2hf_pipeline.survival</code> follows Liu&rsquo;s algorithm verbatim where the modern GDC schema permits. The <code>cdr_*</code> columns are Liu&rsquo;s verbatim values (subject to Liu&rsquo;s special-case handling); the re-derived <code>_event</code>/<code>_time</code> columns use our implementation against current data plus the Clinical Supplement augmentation.</p>
+<p>Our <code>ds2hf_pipeline.tcga.survival</code> follows Liu&rsquo;s algorithm verbatim where the modern GDC schema permits. The <code>cdr_*</code> values are Liu&rsquo;s verbatim (subject to Liu&rsquo;s special-case handling); the re-derived <code>_event</code>/<code>_time</code> columns use our implementation against current data plus the Clinical Supplement augmentation.</p>
 <p><strong>Stage IV exclusion (DFI):</strong> Liu excluded 1,095 stage IV patients from DFI. We do the same via <code>_is_stage_iv</code> checking <code>ajcc_pathologic_stage</code> starts with <code>"Stage IV"</code>.</p>
 <h3>DFI tumor-type special cases</h3>
 <ul>
@@ -2637,7 +2637,7 @@ footer {
 </tr>
 <tr>
 <td>BRCA</td>
-<td>952</td>
+<td>950</td>
 <td>79</td>
 <td>98%</td>
 <td>92%</td>
@@ -2807,7 +2807,7 @@ footer {
 <td>SARC</td>
 <td>153</td>
 <td>66</td>
-<td>73%</td>
+<td>74%</td>
 <td>54%</td>
 <td>51%</td>
 </tr>
@@ -3190,9 +3190,9 @@ footer {
 <tr>
 <td>PFI</td>
 <td>11160</td>
-<td>10720</td>
-<td>96.1</td>
-<td>193</td>
+<td>10719</td>
+<td>96.0</td>
+<td>194</td>
 <td>13</td>
 <td>40</td>
 <td>194</td>
@@ -3200,11 +3200,11 @@ footer {
 <tr>
 <td>DFI</td>
 <td>11160</td>
-<td>5415</td>
+<td>5412</td>
 <td>48.5</td>
-<td>64</td>
+<td>65</td>
 <td>4640</td>
-<td>52</td>
+<td>54</td>
 <td>989</td>
 </tr>
 </tbody>
@@ -3245,7 +3245,7 @@ footer {
 <td>1075/1097 (98%)</td>
 <td>1060/1078 (98%)</td>
 <td>1079/1097 (98%)</td>
-<td>918/953 (96%)</td>
+<td>916/953 (96%)</td>
 </tr>
 <tr>
 <td>CESC</td>
@@ -3420,8 +3420,8 @@ footer {
 <td>261</td>
 <td>252/261 (97%)</td>
 <td>246/255 (96%)</td>
-<td>253/261 (97%)</td>
-<td>149/153 (97%)</td>
+<td>252/261 (97%)</td>
+<td>148/153 (97%)</td>
 </tr>
 <tr>
 <td>SKCM</td>
@@ -3702,7 +3702,7 @@ footer {
 </table></div>
 <h3>Implication</h3>
 <p>OS data drift is the <em>single most concrete</em> evidence that audit-grade reproducibility against Liu requires comparing against the frozen CDR (<code>cdr_*</code> columns), not against the modern GDC. For a survival cohort that includes vital-status updates since 2018, use the re-derived <code>os_event</code> / <code>os_time</code> columns; you&rsquo;ll get more recent and more accurate vital status, but won&rsquo;t bit-match Liu&rsquo;s 2018 numbers.</p>
-<p>For exact Liu reproduction: filter to <code>cdr_matched == True</code> and use <code>cdr_OS</code> / <code>cdr_OS_time</code>.</p>
+<p>For exact Liu reproduction: use <code>OS</code> / <code>OS.time</code> from <code>gabrielaltay/tcga-pancanatlas-cdr</code>.</p>
 <hr>
 <h2 id="section-7-dss-deep-dive-929-match-liursquos-documented-approximation">Section 7 — DSS deep-dive (92.9% match — Liu&rsquo;s documented approximation)</h2>
 <p>Liu&rsquo;s STAR Methods explicitly flags DSS as approximate: <em>&ldquo;Technically a patient could be with tumor but died of a car accident and therefore incorrectly considered as an event.&rdquo;</em> The 7% disagreement is dominated by cases where vital_status / tumor_status / cause_of_death have drifted between 2018 and now, plus our handling of Liu&rsquo;s special case #3 (62 Dead-with-Tumor + defined-NTE cases).</p>
@@ -3838,8 +3838,8 @@ footer {
 <h3>Time-only mismatches (event matches, time differs)</h3>
 <p>These are patients we <em>and</em> Liu both classify as &ldquo;event=1&rdquo; or both &ldquo;event=0&rdquo;, but the time-to-event or time-to-censor differs by ≥0.5 days.</p>
 <ul>
-<li><strong>Total time-only mismatches</strong>: 124</li>
-<li><strong>Median time difference (ours - Liu)</strong>: -366 days</li>
+<li><strong>Total time-only mismatches</strong>: 125</li>
+<li><strong>Median time difference (ours - Liu)</strong>: -364 days</li>
 </ul>
 <p>A negative median difference means our times are <em>earlier</em> than Liu&rsquo;s. That makes sense for events that happened pre-2018 — same date for both. But for censored patients whose follow-up has continued past 2018, our censor time should be <em>later</em> than Liu&rsquo;s (positive diff).</p>
 <h3>Per-project event mismatches</h3>
@@ -3965,7 +3965,7 @@ footer {
 <tbody>
 <tr>
 <td>match</td>
-<td>5415</td>
+<td>5412</td>
 <td>48.5</td>
 <td>Both populated, event AND time agree (within 0.5 days)</td>
 </tr>
@@ -3983,13 +3983,13 @@ footer {
 </tr>
 <tr>
 <td>mismatch</td>
-<td>64</td>
+<td>65</td>
 <td>0.6</td>
 <td>Both populated, disagree on event or time</td>
 </tr>
 <tr>
 <td>cdr_pop_der_na</td>
-<td>52</td>
+<td>54</td>
 <td>0.5</td>
 <td>Liu populated, we don&rsquo;t</td>
 </tr>
@@ -4008,28 +4008,28 @@ footer {
 <tbody>
 <tr>
 <td>Agreement rate (both NA OR both populated within 30d)</td>
-<td>10057 / 11160</td>
+<td>10054 / 11160</td>
 <td>90.1%</td>
 </tr>
 <tr>
 <td>Match where Liu populated</td>
-<td>5415 / 5531</td>
-<td>97.9%</td>
+<td>5412 / 5531</td>
+<td>97.8%</td>
 </tr>
 <tr>
 <td>Match where both populated (exact event + time)</td>
-<td>5415 / 5479</td>
+<td>5412 / 5477</td>
 <td>98.8%</td>
 </tr>
 <tr>
 <td>Event-direction agreement where both populated</td>
-<td>5463 / 5479</td>
+<td>5461 / 5477</td>
 <td>99.7%</td>
 </tr>
 </tbody>
 </table></div>
 <p>The headline metric is the <strong>agreement rate</strong> (90.1%): patients where we and Liu reach the same conclusion, defined as either (a) both correctly NA, or (b) both populated, event direction agrees, time within 30 days. This treats Liu&rsquo;s documented exclusions (SKCM/THYM/UVM/LAML cohorts; stage IV; never-disease-free) as correct agreement when we honor them — which we do — rather than penalizing the score for them.</p>
-<p>When Liu had a value, we agree exactly <strong>97.9%</strong> of the time. When both have a value, the event direction (had-recurrence vs censored) agrees <strong>99.7%</strong> of the time — disagreements are almost always about <em>when</em> the event happened, not <em>whether</em> it happened.</p>
+<p>When Liu had a value, we agree exactly <strong>97.8%</strong> of the time. When both have a value, the event direction (had-recurrence vs censored) agrees <strong>99.7%</strong> of the time — disagreements are almost always about <em>when</em> the event happened, not <em>whether</em> it happened.</p>
 <h3>Per-project DFI populated counts</h3>
 <p>How many DFI patients each project has, comparing Liu&rsquo;s curated count vs ours:</p>
 <div class="table-wrap"><table>
@@ -4047,8 +4047,8 @@ footer {
 <td>BRCA</td>
 <td>1097</td>
 <td>953</td>
-<td>952</td>
-<td>-1</td>
+<td>950</td>
+<td>-3</td>
 </tr>
 <tr>
 <td>UCEC</td>
@@ -4278,22 +4278,22 @@ footer {
 </table></div>
 <h3>What&rsquo;s causing the remaining differences</h3>
 <p>The five buckets break down structurally as follows:</p>
-<h4><code>cdr_pop_der_na</code> (52 patients) — Liu had a value, we still don&rsquo;t</h4>
-<p>Concentrated in BRCA (23) and TGCT (15). Liu&rsquo;s 2018 BCR data had a disease-free signal for these patients that&rsquo;s been re-curated or removed in the modern data — both the harmonized API and the BCR biotab (the canonical source) currently show no signal. These are likely irrecoverable without a 2018 GDC snapshot.</p>
-<h4><code>mismatch</code> (64 patients) — Both populated, disagree</h4>
+<h4><code>cdr_pop_der_na</code> (54 patients) — Liu had a value, we still don&rsquo;t</h4>
+<p>Concentrated in BRCA (25) and TGCT (15). Liu&rsquo;s 2018 BCR data had a disease-free signal for these patients that&rsquo;s been re-curated or removed in the modern data — both the harmonized API and the BCR biotab (the canonical source) currently show no signal. These are likely irrecoverable without a 2018 GDC snapshot.</p>
+<h4><code>mismatch</code> (65 patients) — Both populated, disagree</h4>
 <p>Splits into two sub-categories:</p>
 <ul>
 <li><strong>16 event-direction mismatches</strong> (12 Liu=0/ours=1, 4 Liu=1/ours=0). The Liu=0/ours=1 cases are the same data drift signature as OS: patients censored in Liu&rsquo;s 2018 freeze who have since had a recurrence/progression entered. The reverse (Liu=1/ours=0, 4 cases) is rarer — probably patients where Liu&rsquo;s hand-fix step classified as event but current data doesn&rsquo;t, OR a tumor event that&rsquo;s been re-classified/removed in the GDC since 2018.</li>
-<li><strong>45 time-only mismatches</strong> (event direction agrees, time differs ≥0.5 days). Median diff is <strong>-453 days</strong> (ours earlier than Liu). The pattern: many patients have <code>ours_time = 0</code> while Liu had a real value. Example: BRCA TCGA-D8-A1JK had Liu DFI_time = 612 days; current biotab has <code>last_contact_days_to = 0</code>. The 612 isn&rsquo;t anywhere in modern biotab — the 2018 BCR data had a follow-up timestamp that the GDC&rsquo;s re-curation since then has lost or replaced with 0.</li>
+<li><strong>46 time-only mismatches</strong> (event direction agrees, time differs ≥0.5 days). Median diff is <strong>-447 days</strong> (ours earlier than Liu). The pattern: many patients have <code>ours_time = 0</code> while Liu had a real value. Example: BRCA TCGA-D8-A1JK had Liu DFI_time = 612 days; current biotab has <code>last_contact_days_to = 0</code>. The 612 isn&rsquo;t anywhere in modern biotab — the 2018 BCR data had a follow-up timestamp that the GDC&rsquo;s re-curation since then has lost or replaced with 0.</li>
 </ul>
 <h4><code>der_pop_cdr_na</code> (989 patients) — We populate, Liu didn&rsquo;t</h4>
 <p>Concentrated in COAD (137), LUSC (132), LUAD (92), PRAD (83). 628 are event=0 (censored — we compute, Liu didn&rsquo;t); 361 are event=1 (we found a recurrence Liu couldn&rsquo;t classify because she lacked a baseline disease-free signal). The biotab gives us <code>treatment_outcome_first_course</code> data Liu didn&rsquo;t have in 2018 — for these patients, Liu&rsquo;s algorithm marked NA because no disease-free signal was found in the 2018 data; we now find one in the modernized BCR forms and can populate DFI. <strong>This isn&rsquo;t a bug</strong> — these are genuinely additional patients we can compute DFI for that Liu couldn&rsquo;t.</p>
 <h4><code>both_na</code> (4640 patients) — Both correctly say NA</h4>
 <p>Liu&rsquo;s documented exclusions: SKCM/THYM/UVM/LAML cohorts entirely (no usable disease-free signal in any TCGA sample), plus stage IV patients, plus dead-with-tumor-no-NTE patients, plus &ldquo;never disease-free&rdquo; patients (no positive signal in any of <code>treatment_outcome / residual_disease / margin_status</code>). We honor all of these.</p>
-<h4><code>match</code> (5415 patients) — Both populated, exact agreement</h4>
+<h4><code>match</code> (5412 patients) — Both populated, exact agreement</h4>
 <p>Event AND time agree (within 0.5 days).</p>
 <h3>Implication</h3>
-<p>DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use <code>cdr_DFI</code> filtered to <code>cdr_matched=True</code>. Where you want the broadest coverage including post-2018 patients, use <code>dfi_event</code> / <code>dfi_time</code> and accept the residual ~150 patient gap from Liu&rsquo;s own values.</p>
+<p>DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use <code>DFI</code> / <code>DFI.time</code> from <code>gabrielaltay/tcga-pancanatlas-cdr</code>. Where you want the broadest coverage including post-2018 patients, use <code>dfi_event</code> / <code>dfi_time</code> and accept the residual ~150 patient gap from Liu&rsquo;s own values.</p>
 <p>Causal summary of the remaining ~1.1% disagreement when both populated:
 - <strong>About half is data drift</strong> — modern GDC has re-curated, lost, or updated BCR timestamps that Liu had in 2018 (irrecoverable without a 2018 GDC snapshot).
 - <strong>About a quarter is algorithm-permissiveness</strong> — our OR-of-three check classifies patients Liu&rsquo;s hand-curated step excluded.
@@ -4421,61 +4421,62 @@ footer {
 </ul>
 <p>Other projects (GBM, OV, UCEC, DLBC) added handfuls of new patients, mostly cases that were in-flight at the 2018 freeze and finalized later.</p>
 <h3>Implication for downstream analysis</h3>
-<p>If you&rsquo;re reproducing Liu&rsquo;s results: stick to <code>cdr_*</code> columns + filter <code>cdr_matched == True</code>. You&rsquo;ll work on 11,160 patients exactly matching the 2018 freeze.</p>
+<p>If you&rsquo;re reproducing Liu&rsquo;s results: use <code>gabrielaltay/tcga-pancanatlas-cdr</code>. You&rsquo;ll work on the 11,160 patients of the 2018 freeze, with Liu&rsquo;s values verbatim.</p>
 <p>If you want maximum cohort size or current vital status: use <code>{os,dss,pfi,dfi}_event/_time</code> on all 11,428 patients. The +268 post-freeze patients are most useful for TGCT-specific analyses (where they&rsquo;re a meaningful fraction of the cohort). For most other projects the addition is small enough that conclusions wouldn&rsquo;t change either way.</p>
 <hr>
-<h2 id="section-11-how-to-use-the-two-streams-in-practice">Section 11 — How to use the two streams in practice</h2>
-<p>Each patient row in <code>gabrielaltay/tcga-patients-open</code> (and each <code>cases</code> row in <code>gabrielaltay/tcga-tabular-open</code>) carries <strong>two parallel streams</strong> of survival annotation:</p>
+<h2 id="section-11-which-survival-values-to-use">Section 11 — Which survival values to use</h2>
+<p>The two sources compared in this report are published separately:</p>
 <ul>
-<li><strong><code>cdr_*</code> (curated, frozen)</strong> — Liu&rsquo;s 2018 values lifted verbatim from <code>TCGA-CDR-SupplementalTableS1.xlsx</code>. Direct reproducibility against the paper. Filter on <code>cdr_matched == True</code> to restrict to the 11,160 patients Liu covered.</li>
-<li><strong><code>{os,dss,pfi,dfi}_event</code> / <code>_time</code> (re-derived, live)</strong> — the same four endpoints recomputed from the current GDC data using Liu&rsquo;s documented algorithm (<code>tcga2hf_pipeline.survival</code>), augmented with <code>treatment_outcome_first_course</code> from the BCR biotab Clinical Supplements. Full coverage including 268 post-freeze patients.</li>
+<li><strong>Liu&rsquo;s values (curated, frozen)</strong> — <a href="https://huggingface.co/datasets/gabrielaltay/tcga-pancanatlas-cdr"><code>gabrielaltay/tcga-pancanatlas-cdr</code></a>, config <code>cdr</code>: the workbook&rsquo;s <code>TCGA-CDR</code> sheet verbatim, one row per patient keyed by <code>bcr_patient_barcode</code>, with columns <code>OS</code>, <code>OS.time</code>, <code>DSS</code>, …. Covers the 11,160 patients of the 2018 freeze.</li>
+<li><strong>Our re-derived values (live)</strong> — <code>os_event</code>, <code>os_time</code>, … for all 11,428 current patients, keyed by <code>case_submitter_id</code>. Nested as the <code>survival_derived</code> struct in each <a href="https://huggingface.co/datasets/gabrielaltay/tcga-patients-open"><code>gabrielaltay/tcga-patients-open</code></a> row, and flat as the <code>&lt;project&gt;_survival_derived</code> configs of <a href="https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open"><code>gabrielaltay/tcga-tabular-open</code></a>.</li>
 </ul>
+<p>A TCGA patient barcode is the same in both, so <code>case_submitter_id</code> joins to <code>bcr_patient_barcode</code>.</p>
 <h3>Pick based on what you need</h3>
-<p><strong>For exact reproducibility against Liu et al.</strong> Use <code>cdr_*</code> columns. Filter to <code>cdr_matched == True</code>. You get exactly what&rsquo;s in <code>TCGA-CDR-SupplementalTableS1.xlsx</code>, and your results will line up bit-for-bit with the paper.</p>
-<pre><code class="language-python">import pyarrow.parquet as pq
-patients = pq.read_table(&quot;TCGA-LUAD/data.parquet&quot;).to_pylist()
-liu_cohort = [p for p in patients if p[&quot;cdr_matched&quot;]]
-# OS curve from cdr_OS / cdr_OS_time → reproduces Liu's published numbers.
+<p><strong>For exact reproducibility against Liu et al.</strong> Use Liu&rsquo;s values. Your results will line up with the paper.</p>
+<pre><code class="language-python">from datasets import load_dataset
+
+liu = load_dataset(&quot;gabrielaltay/tcga-pancanatlas-cdr&quot;, &quot;cdr&quot;, split=&quot;train&quot;).to_pandas()
+liu = liu[(liu.type == &quot;LUAD&quot;) &amp; (liu.Redaction != &quot;Redacted&quot;)]
+# OS curve from OS / OS.time → reproduces Liu's published numbers.
 </code></pre>
-<p><strong>For maximum cohort size and current vital status.</strong> Use <code>{os,dss,pfi,dfi}_event/_time</code>. Includes ~268 post-freeze patients and reflects the GDC&rsquo;s current data — patients who died after 2018 show as Dead.</p>
-<pre><code class="language-python">patients = pq.read_table(&quot;TCGA-LUAD/data.parquet&quot;).to_pylist()
-modern_cohort = [p for p in patients if p[&quot;os_event&quot;] is not None]
+<p><strong>For maximum cohort size and current vital status.</strong> Use the re-derived values. They include the post-freeze patients and reflect the GDC&rsquo;s current data — patients who died after 2018 show as dead.</p>
+<pre><code class="language-python">ours = load_dataset(
+    &quot;gabrielaltay/tcga-tabular-open&quot;, &quot;TCGA_LUAD_survival_derived&quot;, split=&quot;train&quot;
+).to_pandas()
+modern_cohort = ours.dropna(subset=[&quot;os_event&quot;])
 # OS curve uses current vital status; includes post-freeze patients.
 </code></pre>
-<p><strong>For audit / sanity-check.</strong> Filter to <code>cdr_matched == True</code> and compare the two streams. Disagreement is a red flag worth investigating, especially for OS (where it&rsquo;s almost always data drift; see Section 6).</p>
-<pre><code class="language-python">matched = [p for p in patients if p[&quot;cdr_matched&quot;]]
-mismatches = [
-    p for p in matched
-    if p[&quot;cdr_OS&quot;] is not None and p[&quot;os_event&quot;] is not None
-    and p[&quot;cdr_OS&quot;] != p[&quot;os_event&quot;]
-]
+<p><strong>For audit / sanity-check.</strong> Join the two and compare. Disagreement is a red flag worth investigating, especially for OS (where it&rsquo;s almost always data drift; see Section 6).</p>
+<pre><code class="language-python">both = ours.merge(liu, left_on=&quot;case_submitter_id&quot;, right_on=&quot;bcr_patient_barcode&quot;)
+both = both.dropna(subset=[&quot;os_event&quot;, &quot;OS&quot;])
+mismatches = both[both.os_event != both.OS]
 # Each mismatch is a patient whose vital status changed since Liu's 2018 freeze.
 </code></pre>
 <h3>Rules of thumb per endpoint</h3>
 <p>Agreement rate = both correctly NA, or both populated and event direction agrees within 30 days.</p>
 <ul>
-<li><strong>OS</strong> — 98% agreement; pick whichever stream fits your time anchor (Liu&rsquo;s freeze vs current).</li>
+<li><strong>OS</strong> — 98% agreement; pick whichever source fits your time anchor (Liu&rsquo;s freeze vs current).</li>
 <li><strong>DSS</strong> — 93% agreement; Liu flagged this as approximate, re-derived value is no more accurate. Use OS instead unless cancer-specific death matters.</li>
-<li><strong>PFI</strong> — 96% agreement; re-derived is past Liu&rsquo;s reliability bar; good substitute for <code>cdr_PFI</code> with extended cohort.</li>
-<li><strong>DFI</strong> — 90% agreement (up from 77% before the supplement integration). Where both Liu and we populated, event-direction agreement is <strong>99.7%</strong>. The bulk of the remaining 10% is patients where we have <em>extra coverage</em> Liu didn&rsquo;t have, not contradictions. For clean Liu reproduction use <code>cdr_DFI</code>; for broader coverage including post-2018 use <code>dfi_event</code>.</li>
+<li><strong>PFI</strong> — 96% agreement; re-derived is past Liu&rsquo;s reliability bar; good substitute for Liu&rsquo;s <code>PFI</code> with extended cohort.</li>
+<li><strong>DFI</strong> — 90% agreement (up from 77% before the supplement integration). Where both Liu and we populated, event-direction agreement is <strong>99.7%</strong>. The bulk of the remaining 10% is patients where we have <em>extra coverage</em> Liu didn&rsquo;t have, not contradictions. For clean Liu reproduction use Liu&rsquo;s <code>DFI</code>; for broader coverage including post-2018 use <code>dfi_event</code>.</li>
 </ul>
 <h3>Where the BCR biotab data lives</h3>
-<p>The Clinical Supplement biotab data that powers our DFI re-derivation is also surfaced as 7 tables per project in <a href="https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open"><code>gabrielaltay/tcga-tabular-open</code></a>:</p>
+<p>The Clinical Supplement biotab data that powers our DFI re-derivation is also surfaced as 7 configs per project (dashes in the project id become underscores, e.g. <code>TCGA_LUAD_clinical_supplement_patient</code>) in <a href="https://huggingface.co/datasets/gabrielaltay/tcga-tabular-open"><code>gabrielaltay/tcga-tabular-open</code></a>:</p>
 <ul>
-<li><code>&lt;project&gt;/clinical_supplement_patient</code> — initial BCR patient form</li>
-<li><code>&lt;project&gt;/clinical_supplement_follow_up</code> — BCR follow-up encounters (one or more form versions per project)</li>
-<li><code>&lt;project&gt;/clinical_supplement_nte</code> — new tumor events</li>
-<li><code>&lt;project&gt;/clinical_supplement_drug</code> — drug records (drug name, dosage, response)</li>
-<li><code>&lt;project&gt;/clinical_supplement_radiation</code> — radiation records</li>
-<li><code>&lt;project&gt;/clinical_supplement_ablation</code> — ablation procedures (LIHC only)</li>
-<li><code>&lt;project&gt;/clinical_supplement_omf</code> — Other Mutation Files (germline)</li>
+<li><code>&lt;project&gt;_clinical_supplement_patient</code> — initial BCR patient form</li>
+<li><code>&lt;project&gt;_clinical_supplement_follow_up</code> — BCR follow-up encounters (one or more form versions per project)</li>
+<li><code>&lt;project&gt;_clinical_supplement_nte</code> — new tumor events</li>
+<li><code>&lt;project&gt;_clinical_supplement_drug</code> — drug records (drug name, dosage, response)</li>
+<li><code>&lt;project&gt;_clinical_supplement_radiation</code> — radiation records</li>
+<li><code>&lt;project&gt;_clinical_supplement_ablation</code> — ablation procedures (LIHC only)</li>
+<li><code>&lt;project&gt;_clinical_supplement_omf</code> — Other Mutation Files (germline)</li>
 </ul>
 <p>Per-project schemas (each project ships only the columns its biotab forms contain — BLCA has BCG-related fields, CHOL/LIHC have hepatic markers, etc.). Cross-project queries union with NULL padding via <code>concatenate_datasets</code>.</p>
 <h2 id="conclusions">Conclusions</h2>
 <ol>
 <li><strong>OS, DSS, PFI reproduce strongly</strong> (98% / 93% / 96% match against Liu&rsquo;s curated values), with most disagreement explainable as data drift since the 2018 freeze.</li>
 <li><strong>DFI is now usable</strong> at <strong>90.1% agreement</strong> (up from 77.2% pre-supplement integration). Where both Liu and we populated, event-direction agreement is <strong>99.7%</strong>. The under-population gap shrank from 1,625 patients to 52 patients after we started fetching BCR biotab Clinical Supplements.</li>
-<li><strong>Two-stream design earns its keep</strong>. For users who want Liu&rsquo;s frozen values for direct reproducibility, <code>cdr_*</code> is verbatim. For users who want a survival cohort that includes 2018+ patients and reflects current vital status, the re-derived columns extend coverage.</li>
+<li><strong>Both sources earn their keep</strong>. For users who want Liu&rsquo;s frozen values for direct reproducibility, <code>tcga-pancanatlas-cdr</code> is verbatim. For users who want a survival cohort that includes 2018+ patients and reflects current vital status, the re-derived values extend coverage.</li>
 <li><strong>The BCR biotab integration is reusable</strong>. Other Pan-Cancer Atlas papers that read BCR-original fields (rather than the harmonized API) can now reproduce against current data without hitting the same wall.</li>
 <li><strong>Validation as a standing practice</strong>. This report documents reproducing one of TCGA Pan-Cancer Atlas issue&rsquo;s headline papers from raw GDC data. The same template applies to Hoadley et al. 2018 (iClusters) and other Pan-Cancer Atlas reproductions — see <a href="../../dev_todo/reproduce_validate_program.md"><code>dev_todo/reproduce_validate_program.md</code></a>.</li>
 </ol>

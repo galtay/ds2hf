@@ -27,11 +27,11 @@ Each of the 11,160 CDR-matched patients lands in one of five buckets when compar
 
 | bucket | patients | % | meaning |
 | --- | --- | --- | --- |
-| match | 5415 | 48.5 | Both populated, event AND time agree (within 0.5 days) |
+| match | 5412 | 48.5 | Both populated, event AND time agree (within 0.5 days) |
 | both_na | 4640 | 41.6 | Both correctly say NA (Liu's documented exclusions) |
 | der_pop_cdr_na | 989 | 8.9 | We populated, Liu didn't |
-| mismatch | 64 | 0.6 | Both populated, disagree on event or time |
-| cdr_pop_der_na | 52 | 0.5 | Liu populated, we don't |
+| mismatch | 65 | 0.6 | Both populated, disagree on event or time |
+| cdr_pop_der_na | 54 | 0.5 | Liu populated, we don't |
 
 ### How to read the match rates
 
@@ -39,14 +39,14 @@ Several useful framings of "how often do we and Liu agree":
 
 | framing | math | rate |
 | --- | --- | --- |
-| Agreement rate (both NA OR both populated within 30d) | 10057 / 11160 | 90.1% |
-| Match where Liu populated | 5415 / 5531 | 97.9% |
-| Match where both populated (exact event + time) | 5415 / 5479 | 98.8% |
-| Event-direction agreement where both populated | 5463 / 5479 | 99.7% |
+| Agreement rate (both NA OR both populated within 30d) | 10054 / 11160 | 90.1% |
+| Match where Liu populated | 5412 / 5531 | 97.8% |
+| Match where both populated (exact event + time) | 5412 / 5477 | 98.8% |
+| Event-direction agreement where both populated | 5461 / 5477 | 99.7% |
 
 The headline metric is the **agreement rate** (90.1%): patients where we and Liu reach the same conclusion, defined as either (a) both correctly NA, or (b) both populated, event direction agrees, time within 30 days. This treats Liu's documented exclusions (SKCM/THYM/UVM/LAML cohorts; stage IV; never-disease-free) as correct agreement when we honor them — which we do — rather than penalizing the score for them.
 
-When Liu had a value, we agree exactly **97.9%** of the time. When both have a value, the event direction (had-recurrence vs censored) agrees **99.7%** of the time — disagreements are almost always about *when* the event happened, not *whether* it happened.
+When Liu had a value, we agree exactly **97.8%** of the time. When both have a value, the event direction (had-recurrence vs censored) agrees **99.7%** of the time — disagreements are almost always about *when* the event happened, not *whether* it happened.
 
 ### Per-project DFI populated counts
 
@@ -54,7 +54,7 @@ How many DFI patients each project has, comparing Liu's curated count vs ours:
 
 | project | N | Liu_pop | ours_pop | delta |
 | --- | --- | --- | --- | --- |
-| BRCA | 1097 | 953 | 952 | -1 |
+| BRCA | 1097 | 953 | 950 | -3 |
 | UCEC | 548 | 426 | 474 | 48 |
 | THCA | 507 | 358 | 390 | 32 |
 | PRAD | 500 | 340 | 423 | 83 |
@@ -92,16 +92,16 @@ How many DFI patients each project has, comparing Liu's curated count vs ours:
 
 The five buckets break down structurally as follows:
 
-#### `cdr_pop_der_na` (52 patients) — Liu had a value, we still don't
+#### `cdr_pop_der_na` (54 patients) — Liu had a value, we still don't
 
-Concentrated in BRCA (23) and TGCT (15). Liu's 2018 BCR data had a disease-free signal for these patients that's been re-curated or removed in the modern data — both the harmonized API and the BCR biotab (the canonical source) currently show no signal. These are likely irrecoverable without a 2018 GDC snapshot.
+Concentrated in BRCA (25) and TGCT (15). Liu's 2018 BCR data had a disease-free signal for these patients that's been re-curated or removed in the modern data — both the harmonized API and the BCR biotab (the canonical source) currently show no signal. These are likely irrecoverable without a 2018 GDC snapshot.
 
-#### `mismatch` (64 patients) — Both populated, disagree
+#### `mismatch` (65 patients) — Both populated, disagree
 
 Splits into two sub-categories:
 
 - **16 event-direction mismatches** (12 Liu=0/ours=1, 4 Liu=1/ours=0). The Liu=0/ours=1 cases are the same data drift signature as OS: patients censored in Liu's 2018 freeze who have since had a recurrence/progression entered. The reverse (Liu=1/ours=0, 4 cases) is rarer — probably patients where Liu's hand-fix step classified as event but current data doesn't, OR a tumor event that's been re-classified/removed in the GDC since 2018.
-- **45 time-only mismatches** (event direction agrees, time differs ≥0.5 days). Median diff is **-453 days** (ours earlier than Liu). The pattern: many patients have `ours_time = 0` while Liu had a real value. Example: BRCA TCGA-D8-A1JK had Liu DFI_time = 612 days; current biotab has `last_contact_days_to = 0`. The 612 isn't anywhere in modern biotab — the 2018 BCR data had a follow-up timestamp that the GDC's re-curation since then has lost or replaced with 0.
+- **46 time-only mismatches** (event direction agrees, time differs ≥0.5 days). Median diff is **-447 days** (ours earlier than Liu). The pattern: many patients have `ours_time = 0` while Liu had a real value. Example: BRCA TCGA-D8-A1JK had Liu DFI_time = 612 days; current biotab has `last_contact_days_to = 0`. The 612 isn't anywhere in modern biotab — the 2018 BCR data had a follow-up timestamp that the GDC's re-curation since then has lost or replaced with 0.
 
 #### `der_pop_cdr_na` (989 patients) — We populate, Liu didn't
 
@@ -111,13 +111,13 @@ Concentrated in COAD (137), LUSC (132), LUAD (92), PRAD (83). 628 are event=0 (c
 
 Liu's documented exclusions: SKCM/THYM/UVM/LAML cohorts entirely (no usable disease-free signal in any TCGA sample), plus stage IV patients, plus dead-with-tumor-no-NTE patients, plus "never disease-free" patients (no positive signal in any of `treatment_outcome / residual_disease / margin_status`). We honor all of these.
 
-#### `match` (5415 patients) — Both populated, exact agreement
+#### `match` (5412 patients) — Both populated, exact agreement
 
 Event AND time agree (within 0.5 days).
 
 ### Implication
 
-DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use `cdr_DFI` filtered to `cdr_matched=True`. Where you want the broadest coverage including post-2018 patients, use `dfi_event` / `dfi_time` and accept the residual ~150 patient gap from Liu's own values.
+DFI is now usable as a re-derived endpoint for most projects. Where you need exact Liu reproduction, use `DFI` / `DFI.time` from `gabrielaltay/tcga-pancanatlas-cdr`. Where you want the broadest coverage including post-2018 patients, use `dfi_event` / `dfi_time` and accept the residual ~150 patient gap from Liu's own values.
 
 Causal summary of the remaining ~1.1% disagreement when both populated:
 - **About half is data drift** — modern GDC has re-curated, lost, or updated BCR timestamps that Liu had in 2018 (irrecoverable without a 2018 GDC snapshot).

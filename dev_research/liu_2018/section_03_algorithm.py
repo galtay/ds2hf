@@ -70,7 +70,7 @@ From the paper's *Handling of special cases and problems in clinical data files*
 9. **One Alive-then-Dead patient with no death date** — used the enrollment-file Alive value.
 10. **One OV with grade 4** — invalid grade for OV but kept as-is.
 
-Our `ds2hf_pipeline.tcga.survival` follows Liu's algorithm verbatim where the modern GDC schema permits. The `cdr_*` columns are Liu's verbatim values (subject to Liu's special-case handling); the re-derived `_event`/`_time` columns use our implementation against current data plus the Clinical Supplement augmentation.
+Our `ds2hf_pipeline.tcga.survival` follows Liu's algorithm verbatim where the modern GDC schema permits. The `cdr_*` values are Liu's verbatim (subject to Liu's special-case handling); the re-derived `_event`/`_time` columns use our implementation against current data plus the Clinical Supplement augmentation.
 
 **Stage IV exclusion (DFI):** Liu excluded 1,095 stage IV patients from DFI. We do the same via `_is_stage_iv` checking `ajcc_pathologic_stage` starts with `"Stage IV"`.
 

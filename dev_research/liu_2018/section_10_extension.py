@@ -53,7 +53,7 @@ Other projects (GBM, OV, UCEC, DLBC) added handfuls of new patients, mostly case
 
 ### Implication for downstream analysis
 
-If you're reproducing Liu's results: stick to `cdr_*` columns + filter `cdr_matched == True`. You'll work on 11,160 patients exactly matching the 2018 freeze.
+If you're reproducing Liu's results: use `gabrielaltay/tcga-pancanatlas-cdr`. You'll work on the 11,160 patients of the 2018 freeze, with Liu's values verbatim.
 
 If you want maximum cohort size or current vital status: use `{{os,dss,pfi,dfi}}_event/_time` on all 11,428 patients. The +268 post-freeze patients are most useful for TGCT-specific analyses (where they're a meaningful fraction of the cohort). For most other projects the addition is small enough that conclusions wouldn't change either way.
 """

@@ -42,7 +42,7 @@ Patients alive in Liu's CDR, dead in modern GDC. These are individually traceabl
 
 OS data drift is the *single most concrete* evidence that audit-grade reproducibility against Liu requires comparing against the frozen CDR (`cdr_*` columns), not against the modern GDC. For a survival cohort that includes vital-status updates since 2018, use the re-derived `os_event` / `os_time` columns; you'll get more recent and more accurate vital status, but won't bit-match Liu's 2018 numbers.
 
-For exact Liu reproduction: filter to `cdr_matched == True` and use `cdr_OS` / `cdr_OS_time`.
+For exact Liu reproduction: use `OS` / `OS.time` from `gabrielaltay/tcga-pancanatlas-cdr`.
 """
 
 

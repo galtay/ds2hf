@@ -28,9 +28,8 @@ uv run python section_01_cohort.py
 uv run python section_02_followup.py
 # ... section_03 through 11 ...
 
-# Assemble report.html (requires the `report` extra):
-uv sync --extra report  # one-time, installs python-markdown
-uv run python assemble_html.py
+# Assemble report.html (the `report` extra adds python-markdown):
+uv run --extra report python assemble_html.py
 ```
 
 The cache (`_cache/*.parquet`, `_cache/*.jsonl`) is gitignored. Section markdown outputs (`sections/*.md`) and the assembled `report.html` are committed.

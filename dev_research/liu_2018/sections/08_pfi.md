@@ -15,8 +15,8 @@ The asymmetric direction (most are Liu=0, ours=1) is the same data-drift signal 
 
 These are patients we *and* Liu both classify as "event=1" or both "event=0", but the time-to-event or time-to-censor differs by ≥0.5 days.
 
-- **Total time-only mismatches**: 124
-- **Median time difference (ours - Liu)**: -366 days
+- **Total time-only mismatches**: 125
+- **Median time difference (ours - Liu)**: -364 days
 
 A negative median difference means our times are *earlier* than Liu's. That makes sense for events that happened pre-2018 — same date for both. But for censored patients whose follow-up has continued past 2018, our censor time should be *later* than Liu's (positive diff).
 
