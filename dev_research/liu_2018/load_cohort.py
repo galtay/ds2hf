@@ -30,7 +30,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
-from tcga2hf_pipeline import cdr, clinical, clinical_supplement, survival
+from ds2hf_pipeline.tcga import cdr, clinical, clinical_supplement, survival
 
 HERE = Path(__file__).parent
 CACHE = HERE / "_cache"

@@ -1,0 +1,18 @@
+[project]
+name = "ds2hf"
+version = "0.1.0"
+description = "Read-side companions for the ds2hf HuggingFace datasets: typed TCGA models and schemas, and the MSK-CHORD local loader."
+readme = "README.md"
+authors = [
+    { name = "Gabriel Altay", email = "gabriel.altay@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "huggingface-hub>=1.13.0",
+    "pyarrow>=24.0.0",
+    "pydantic>=2.13.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"

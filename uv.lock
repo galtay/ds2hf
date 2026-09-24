@@ -12,10 +12,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "mskchord2hf",
-    "mskchord2hf-pipeline",
-    "tcga2hf",
-    "tcga2hf-pipeline",
+    "ds2hf",
+    "ds2hf-pipeline",
 ]
 
 [manifest.dependency-groups]
@@ -102,6 +100,59 @@ sdist = { url = "https://files.pythonhosted.org/packages/c9/02/bd72be9134d25ed78
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl", hash = "sha256:4b0ce306c966eb73bc3a7b6abad017c556dadd92c44701562cd528ac7fde4d5b", size = 470628, upload-time = "2026-06-12T08:04:50.506Z" },
 ]
+
+[[package]]
+name = "ds2hf"
+version = "0.1.0"
+source = { editable = "packages/ds2hf" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "huggingface-hub", specifier = ">=1.13.0" },
+    { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "pydantic", specifier = ">=2.13.3" },
+]
+
+[[package]]
+name = "ds2hf-pipeline"
+version = "0.1.0"
+source = { editable = "packages/ds2hf-pipeline" }
+dependencies = [
+    { name = "ds2hf" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "python-dotenv" },
+    { name = "tenacity" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+report = [
+    { name = "markdown" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ds2hf", editable = "packages/ds2hf" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "huggingface-hub", specifier = ">=1.13.0" },
+    { name = "markdown", marker = "extra == 'report'", specifier = ">=3.7" },
+    { name = "openpyxl", specifier = ">=3.1" },
+    { name = "pandas", specifier = ">=3.0.2" },
+    { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "tenacity", specifier = ">=9.1.4" },
+    { name = "typer", specifier = ">=0.25.1" },
+]
+provides-extras = ["report"]
 
 [[package]]
 name = "et-xmlfile"
@@ -274,42 +325,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
-name = "mskchord2hf"
-version = "0.1.0"
-source = { editable = "packages/mskchord2hf" }
-dependencies = [
-    { name = "huggingface-hub" },
-    { name = "pyarrow" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "huggingface-hub", specifier = ">=1.13.0" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
-]
-
-[[package]]
-name = "mskchord2hf-pipeline"
-version = "0.1.0"
-source = { editable = "packages/mskchord2hf-pipeline" }
-dependencies = [
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "pyarrow" },
-    { name = "python-dotenv" },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "huggingface-hub", specifier = ">=1.13.0" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "typer", specifier = ">=0.25.1" },
 ]
 
 [[package]]
@@ -726,55 +741,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
 ]
-
-[[package]]
-name = "tcga2hf"
-version = "0.1.0"
-source = { editable = "packages/tcga2hf" }
-dependencies = [
-    { name = "pyarrow" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyarrow", specifier = ">=24.0.0" },
-    { name = "pydantic", specifier = ">=2.13.3" },
-]
-
-[[package]]
-name = "tcga2hf-pipeline"
-version = "0.1.0"
-source = { editable = "packages/tcga2hf-pipeline" }
-dependencies = [
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "openpyxl" },
-    { name = "pandas" },
-    { name = "python-dotenv" },
-    { name = "tcga2hf" },
-    { name = "tenacity" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-report = [
-    { name = "markdown" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "huggingface-hub", specifier = ">=1.13.0" },
-    { name = "markdown", marker = "extra == 'report'", specifier = ">=3.7" },
-    { name = "openpyxl", specifier = ">=3.1" },
-    { name = "pandas", specifier = ">=3.0.2" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "tcga2hf", editable = "packages/tcga2hf" },
-    { name = "tenacity", specifier = ">=9.1.4" },
-    { name = "typer", specifier = ">=0.25.1" },
-]
-provides-extras = ["report"]
 
 [[package]]
 name = "tenacity"

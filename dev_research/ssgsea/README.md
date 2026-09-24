@@ -1,6 +1,6 @@
 # ssGSEA — validation against Bioconductor GSVA
 
-`tcga2hf_pipeline.ssgsea` is a Python transcription of GSVA's `ssgsea.R`.
+`ds2hf_pipeline.tcga.ssgsea` is a Python transcription of GSVA's `ssgsea.R`.
 This directory holds what makes that transcription trustworthy: a small
 deterministic fixture and the scores GSVA itself produced for it.
 
@@ -36,7 +36,7 @@ Residuals are float64 summation-order noise.
 | `fixture_expected_raw.csv` | raw ssGSEA scores from GSVA 2.6.6, `minSize=10 maxSize=500 alpha=0.25 normalize=FALSE` |
 | `fixture_oracle.R` | the script that produced them |
 
-`packages/tcga2hf-pipeline/tests/test_ssgsea.py::test_matches_gsva_reference`
+`packages/ds2hf-pipeline/tests/test_ssgsea.py::test_matches_gsva_reference`
 asserts we reproduce `fixture_expected_raw.csv` to within 1e-9 relative.
 
 ## Regenerating the reference

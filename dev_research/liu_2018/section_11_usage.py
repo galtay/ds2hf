@@ -20,7 +20,7 @@ REPORT = """\
 Each patient row in `gabrielaltay/tcga-patients-open` (and each `cases` row in `gabrielaltay/tcga-tabular-open`) carries **two parallel streams** of survival annotation:
 
 - **`cdr_*` (curated, frozen)** — Liu's 2018 values lifted verbatim from `TCGA-CDR-SupplementalTableS1.xlsx`. Direct reproducibility against the paper. Filter on `cdr_matched == True` to restrict to the 11,160 patients Liu covered.
-- **`{os,dss,pfi,dfi}_event` / `_time` (re-derived, live)** — the same four endpoints recomputed from the current GDC data using Liu's documented algorithm (`tcga2hf_pipeline.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements. Full coverage including 268 post-freeze patients.
+- **`{os,dss,pfi,dfi}_event` / `_time` (re-derived, live)** — the same four endpoints recomputed from the current GDC data using Liu's documented algorithm (`ds2hf_pipeline.tcga.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements. Full coverage including 268 post-freeze patients.
 
 ### Pick based on what you need
 

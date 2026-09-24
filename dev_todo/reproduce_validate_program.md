@@ -7,7 +7,7 @@ same raw data, and validate that we get the same answer for the cases
 they covered.
 
 This emerged from the CDR (Liu et al. 2018) work in
-`tcga2hf_pipeline.survival`. That pattern — curated stream alongside
+`ds2hf_pipeline.tcga.survival`. That pattern — curated stream alongside
 re-derived stream, with a per-project per-endpoint match-rate report
 (`scripts/validate_survival.py`) — is the template.
 

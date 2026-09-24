@@ -28,7 +28,7 @@ Liu et al. curated four survival endpoints — Overall Survival (OS), Disease-Sp
 Our `tcga2hf` pipeline ships **two parallel streams** of survival annotation on every patient row:
 
 1. **`cdr_*` (curated, frozen)** — Liu's values lifted verbatim from `TCGA-CDR-SupplementalTableS1.xlsx`. Direct reproducibility; ~268 of our 11,428 patients post-date Liu's freeze and have no CDR row.
-2. **`{os,dss,pfi,dfi}_event` / `_time` (re-derived, live)** — the same four endpoints recomputed from the current GDC data using Liu's documented algorithm (`tcga2hf_pipeline.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements.
+2. **`{os,dss,pfi,dfi}_event` / `_time` (re-derived, live)** — the same four endpoints recomputed from the current GDC data using Liu's documented algorithm (`ds2hf_pipeline.tcga.survival`), augmented with `treatment_outcome_first_course` from the BCR biotab Clinical Supplements.
 
 This report walks through three things:
 

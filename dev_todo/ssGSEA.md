@@ -598,7 +598,7 @@ a scratch dir. To make it real:
 - `dev_research/ssgsea/` — the oracle fixture (`gsva_raw.csv`), `oracle.R`,
   `run_oracle.sh`, and the comparison script, following the
   `dev_research/liu_2018/` pattern.
-- `tcga2hf_pipeline/ssgsea.py` — matrix build + scoring.
+- `ds2hf_pipeline/tcga/ssgsea.py` — matrix build + scoring.
 - `tests/test_ssgsea.py` — canary against a handful of committed oracle
   values, plus the log1p-invariance and chunk-equivalence properties (all
   cheap, all deterministic).

@@ -24,7 +24,7 @@ repos:
         # where stripping a hard break would silently change a published
         # card. No card uses one today; this keeps it that way by accident
         # rather than by luck.
-        exclude: ^packages/tcga2hf-pipeline/src/tcga2hf_pipeline/dataset_card\.py$
+        exclude: ^packages/ds2hf-pipeline/src/ds2hf_pipeline/tcga/dataset_card\.py$
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml

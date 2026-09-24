@@ -13,5 +13,5 @@ when there's room.
 - [`ssGSEA.md`](ssGSEA.md) — pathway activity as a derived molecular
   modality. Scoping plus a 100-sample proof-of-concept; the implementation
   and its GSVA validation are now in the repo
-  (`tcga2hf_pipeline.ssgsea`, `dev_research/ssgsea/`). What remains is the
+  (`ds2hf_pipeline.tcga.ssgsea`, `dev_research/ssgsea/`). What remains is the
   cohort-wide run and the published table.
